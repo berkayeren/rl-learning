@@ -1,7 +1,8 @@
 import numpy as np
+import ray
 
 from classes.policy import Policy
-from classes.simulation import Simulation
+from classes.simulation import Simulation, SimulationActor
 
 
 def train_policy(env, num_episodes=10000, weight=0.1, discount_factor=0.9):
@@ -45,12 +46,27 @@ def evaluate_policy(env, policy, num_episodes=10):
     return steps / num_episodes
 
 
+def train_policy_parallel(env, num_episodes=1000, num_simulations=4):
+    """Parallel policy training function."""
+    policy = Policy(env)
+    simulations = [SimulationActor.remote() for _ in range(num_simulations)]
+
+    policy_ref = ray.put(policy)
+    for _ in range(num_episodes):
+        experiences = [sim.rollout.remote(policy_ref) for sim in simulations]
+
+        while len(experiences) > 0:
+            finished, experiences = ray.wait(experiences)
+            for xp in ray.get(finished):
+                update_policy(policy, xp)
+
+    return policy
+
+
 if __name__ == "__main__":
     from classes.environment import Environment
 
     environment = Environment()
     untrained_policy = Policy(environment)
-    trained_policy = train_policy(environment)
-
-    evaluate_policy(environment, trained_policy)
-    # evaluate_policy(environment, untrained_policy)
+    parallel_policy = train_policy_parallel(environment)
+    evaluate_policy(environment, parallel_policy)

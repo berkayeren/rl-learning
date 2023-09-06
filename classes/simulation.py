@@ -1,5 +1,9 @@
 import time
 
+import ray
+
+from classes.environment import Environment
+
 
 class Simulation(object):
     def __init__(self, env):
@@ -21,3 +25,12 @@ class Simulation(object):
                 self.env.render()
 
         return experiences
+
+
+@ray.remote
+class SimulationActor(Simulation):
+    """Ray actor for a Simulation."""
+
+    def __init__(self):
+        env = Environment()
+        super().__init__(env)
