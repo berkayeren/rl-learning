@@ -1,5 +1,8 @@
 import os
 
+import gym
+from gym.spaces import Discrete
+
 from classes.discrete import Discrete
 
 
@@ -56,3 +59,9 @@ class Environment:
         grid[self.seeker[0]][self.seeker[1]] = '|S'
 
         print(''.join([''.join(grid_row) for grid_row in grid]))
+
+
+class GymEnvironment(Environment, gym.Env):
+    def __init__(self, *args, **kwargs):
+        """Make our original Environment a gym `Env`."""
+        super().__init__(*args, **kwargs)
