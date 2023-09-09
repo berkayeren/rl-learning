@@ -3,10 +3,11 @@ import os
 import gym
 from gym.spaces import Discrete
 
-from classes.discrete import Discrete
-
 
 class Environment:
+    action_space: gym.spaces.Space
+    observation_space: gym.spaces.Space
+
     def __init__(self, *args, **kwargs):
         self.seeker, self.goal = (0, 0), (4, 4)
         self.info = {'seeker': self.seeker, 'goal': self.goal}
