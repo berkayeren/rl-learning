@@ -1,5 +1,20 @@
-from ray.rllib.algorithms.dqn import DQNConfig
+from ray import tune
 
-config = DQNConfig().environment("classes.environment.GymEnvironment").rollouts(num_rollout_workers=2)
+# Specify the configuration
+config = {
+    "env": "classes.environment.GymEnvironment",  # Assuming this is a custom Gym environment you've defined
+    "num_workers": 2,
+    # ... other PPO-specific configurations
+}
 
-# rllib train file maze.py --stop '{\"timesteps_total\": 10000}'
+if __name__ == "__main__":
+    # Train using tune.run() with stopping conditions
+    tune.run(
+        'PPO',
+        config=config,
+        stop={
+            "timesteps_total": 100000
+        }
+    )
+
+# rllib evaluate ~/ray_results/maze_env/<checkpoint> --algo DQN\ --env maze_gym_env.Environment\ --steps 100
