@@ -23,7 +23,7 @@ new_trainer: PPOTrainer = PPOTrainer(config=config)
 # )
 
 # Set up the environment.
-env = gym.make("BipedalWalker-v3")
+env = gym.make("MiniGrid-Playground-v0")
 env.reset()
 observation = env.reset()
 action: gym.spaces.Box = new_trainer.compute_single_action(observation)

@@ -6,7 +6,7 @@ from ray.rllib.agents.ppo import DEFAULT_CONFIG
 
 # Ensure Ray is shut down and then initialize.
 ray.shutdown()
-ray.init(ignore_reinit_error=True)
+ray.init(ignore_reinit_error=True, num_gpus=1)
 
 # Define a configuration type for clarity.
 ConfigType = Dict[str, Union[str, float, Any]]
@@ -30,5 +30,5 @@ analysis = tune.run(
     stop=stop,
     checkpoint_at_end=True,
     checkpoint_freq=1000,
-    resume=True
+    resume="AUTO"
 )
