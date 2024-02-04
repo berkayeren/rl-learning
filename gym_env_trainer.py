@@ -1,3 +1,4 @@
+from minigrid.wrappers import FlatObsWrapper
 from ray.tune import register_env
 
 try:
@@ -11,17 +12,21 @@ except Exception:
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
-from gymnasium.wrappers import EnvCompatibility
 
 ray.shutdown()
-ray.init(ignore_reinit_error=True, num_gpus=1)
+ray.init(ignore_reinit_error=True, num_gpus=1, _metrics_export_port=8080, include_dashboard=True)
+
+
+class CustomFlatObsWrapper(FlatObsWrapper):
+    def __init__(self, env):
+        super().__init__(env)
 
 
 # Define a custom environment creator function
 def env_creator(env_config):
-    env = gym.make("MiniGrid-Empty-8x8-v0")
+    env = gym.make("MiniGrid-Playground-v0")
     env.reset()
-    env = EnvCompatibility(env)
+    env = CustomFlatObsWrapper(env)
     return env
 
 
@@ -50,7 +55,7 @@ analysis = tune.run(
     config=tune_config,
     stop=stop,
     checkpoint_at_end=True,
-    checkpoint_freq=1000,
+    checkpoint_freq=10,
     resume="AUTO"
 )
 
