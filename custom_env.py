@@ -1,14 +1,14 @@
-import numpy as np
-from minigrid.core.world_object import Goal, Door
+from minigrid.core.world_object import Door, Goal
 from minigrid.envs import MultiRoomEnv
-from minigrid.wrappers import FlatObsWrapper
 
-from minigrid.core.world_object import Wall, Door, Goal
-from minigrid.envs import MultiRoomEnv
+from dowham import DoWhaMIntrinsicReward
 
 
 class CustomMultiRoomEnv(MultiRoomEnv):
     def __init__(self, *args, **kwargs):
+        self.max_episode_steps = kwargs.pop('max_episode_steps', 100)
+        self.enable_dowham = kwargs.pop('enable_dowham', False)
+        self.dowham_reward = kwargs.pop('dowham_reward', DoWhaMIntrinsicReward(eta=1.5, H=1.0, tau=0.5))
         # Extract custom configurations or set defaults
         self.previous_distance = 0
         self.custom_agent_start_pos = kwargs.pop('agent_start_pos', (1, 1))
@@ -44,20 +44,17 @@ class CustomMultiRoomEnv(MultiRoomEnv):
         self.agent_dir = self.custom_agent_start_dir if self.custom_agent_start_dir is not None else 0
 
     def step(self, action):
+        current_state = self.agent_pos
         obs, reward, done, info, _ = super().step(action)
 
-        # Calculate the Euclidean distance to the goal
-        current_distance = np.linalg.norm(np.array(self.agent_pos) - np.array(self.custom_goal_pos))
-
-        # If the agent moved closer to the goal, increase the reward
-        if current_distance < self.previous_distance:
-            reward += 1
-        # If the agent moved away from the goal, decrease the reward
-        elif current_distance > self.previous_distance:
-            reward -= 1
-
-        # Update the previous distance
-        self.previous_distance = current_distance
+        if self.enable_dowham:
+            next_state = self.agent_pos
+            self.dowham_reward.update_state_visits(next_state)
+            state_changed = current_state != next_state
+            self.dowham_reward.update_usage(action)
+            self.dowham_reward.update_effectiveness(action, state_changed)
+            intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(action, current_state, next_state)
+            reward += intrinsic_reward
 
         return obs, reward, done, info, {}
 
