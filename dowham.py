@@ -42,6 +42,8 @@ class DoWhaMIntrinsicReward:
         exp_term = self.eta ** (1 - term)
         bonus = (exp_term - 1) / (self.eta - 1)
         # print(f"Term: {term}, Exp Term: {exp_term}, Bonus: {bonus}")  # Debug output
+        if state != next_state:
+            return 0
         return bonus
 
     def update_state_visits(self, state):
@@ -52,13 +54,11 @@ class DoWhaMIntrinsicReward:
             state_count = self.state_visit_counts.get(next_state, 1) ** self.tau
             action_bonus = self.calculate_action_bonus(state, next_state, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
-            # print(f"State Count: {state_count}, Action Bonus: {action_bonus}, Intrinsic Reward: {intrinsic_reward}")
-
+            # print(f"State Count: {state_count}, Action Bonus: {action_bonus}, Intrinsic Reward: {intrinsic_reward}"
             # if state not in self.intrinsic_rewards:
-            #     self.intrinsic_rewards[state] = []
+            #    self.intrinsic_rewards[state] = []
             #
             # self.intrinsic_rewards[state].append(intrinsic_reward)
-
             # print(self.intrinsic_rewards[state])
 
             return intrinsic_reward
