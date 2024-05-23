@@ -1,9 +1,10 @@
 import random
 
 import numpy as np
+from gymnasium.envs.registration import EnvSpec
 from gymnasium.spaces import Box, Dict, Discrete
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Goal, Door
+from minigrid.core.world_object import Goal, Door, Key
 from minigrid.envs import MultiRoomEnv
 
 
@@ -19,6 +20,10 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             'direction': Discrete(4),
             'mission': Box(low=0, high=255, shape=(1,), dtype=np.uint8)  # Simplified mission space for demonstration
         })
+        self.carrying = Key('yellow')
+        self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
+
+
 
     @staticmethod
     def _gen_mission():
@@ -43,6 +48,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.mission = "traverse the rooms to get to the goal"
 
     def step(self, action):
+        print('step')
         current_state = self.agent_pos
         obs, reward, done, info, _ = super().step(action)
         next_state = self.agent_pos
@@ -64,7 +70,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
     def reset(self, **kwargs):
         self.dowham_reward.reset_episode()
         obs = super().reset(**kwargs)
-        print(obs[0]['image'])
         obs = {
             'image': obs[0]['image'],
             'direction': np.array(self.agent_dir, dtype=np.int64),

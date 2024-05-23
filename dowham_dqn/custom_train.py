@@ -1,11 +1,12 @@
 import ray
 from gymnasium.envs.registration import register
+from minigrid.wrappers import FullyObsWrapper
 from ray.rllib.algorithms import DQN
 from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.models import ModelCatalog
 from ray.tune import register_env
 
-from dowham_dqn.custom_dqn_model import CustomDQNModel
+from dowham_dqn.custom_dqn_model import CustomDQNModel, CustomMinigridPolicyNet
 from dowham_dqn.custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
@@ -37,7 +38,7 @@ ray.init(ignore_reinit_error=True)
 # register_env("my_minigrid_env", env_creator)
 
 # Register the custom environment
-register_env("MiniGrid-CustomPlayground-v0", lambda config: CustomPlaygroundEnv())
+register_env("MiniGrid-CustomPlayground-v0", lambda config: FullyObsWrapper(CustomPlaygroundEnv()))
 
 # Configure DQN with the custom environment and model
 config = (
@@ -57,7 +58,7 @@ config = (
         lr=1e-5,
         optimizer={"type": "RMSProp"},
         model={
-            "custom_model": "custom_dqn_model",
+            "custom_model": "custom_minigrid",
         },
         gamma=0.99,
         train_batch_size=32,
@@ -79,6 +80,7 @@ config = (
 
 # Register the custom model
 ModelCatalog.register_custom_model("custom_dqn_model", CustomDQNModel)
+ModelCatalog.register_custom_model("custom_minigrid", CustomMinigridPolicyNet)
 
 # Instantiate the DQN trainer
 dqn_trainer = DQN(config=config)
@@ -92,6 +94,7 @@ if __name__ == "__main__":
 
     # Training loop
     for i in range(1000):  # Number of training iterations
+        print(f"Iteration {i}")
         result = dqn_trainer.train()
         print(f"Iteration {i} - Reward: {result['episode_reward_mean']}")
 
