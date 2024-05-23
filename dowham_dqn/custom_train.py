@@ -1,6 +1,6 @@
 import ray
 from gymnasium.envs.registration import register
-from minigrid.wrappers import FullyObsWrapper
+from minigrid.wrappers import ImgObsWrapper
 from ray.rllib.algorithms import DQN
 from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.models import ModelCatalog
@@ -38,7 +38,7 @@ ray.init(ignore_reinit_error=True)
 # register_env("my_minigrid_env", env_creator)
 
 # Register the custom environment
-register_env("MiniGrid-CustomPlayground-v0", lambda config: FullyObsWrapper(CustomPlaygroundEnv()))
+register_env("MiniGrid-CustomPlayground-v0", lambda config: ImgObsWrapper(CustomPlaygroundEnv()))
 
 # Configure DQN with the custom environment and model
 config = (

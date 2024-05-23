@@ -114,83 +114,77 @@ class CustomMinigridPolicyNet(TorchModelV2, nn.Module):
         TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
         nn.Module.__init__(self)
 
-        # Assuming the observation space is a Dict with 'image', 'direction', and 'mission'
-        self.observation_shape = obs_space.shape
+        self.obs_shape = obs_space.shape
         self.num_actions = action_space.n
 
-        init_ = lambda m: init(m, nn.init.orthogonal_,
-                               lambda x: nn.init.constant_(x, 0),
-                               nn.init.calculate_gain('relu'))
+        # Adjusted to handle image observations from ImgObsWrapper
+        self.conv1 = nn.Conv2d(self.obs_shape[0], 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
 
-        self.feat_extract = nn.Sequential(
-            init_(nn.Conv2d(in_channels=3, out_channels=32, kernel_size=(3, 3), stride=2, padding=1)),
-            nn.ELU(),
-            init_(nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(3, 3), stride=2, padding=1)),
-            nn.ELU(),
-            init_(nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(3, 3), stride=2, padding=1)),
-            nn.ELU(),
-        )
-
-        self.fc = nn.Sequential(
-            init_(nn.Linear(32 * ((self.observation_shape[0] // 8) ** 2), 1024)),
-            # Adjust the input size to match the output of convolutional layers
-            nn.ReLU(),
-            init_(nn.Linear(1024, 1024)),
-            nn.ReLU(),
-        )
+        self.fc1 = nn.Linear(self._feature_size(), 1024)
+        self.fc2 = nn.Linear(1024, 1024)
 
         self.lstm = nn.LSTM(1024, 1024, batch_first=True)
 
-        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0))
+        self.actor_head = nn.Linear(1024, num_outputs)
+        self.critic_head = nn.Linear(1024, 1)
 
-        self.actor_head = nn.Sequential(
-            init_(nn.Linear(1024, 1024)),
-            nn.ReLU(),
-            init_(nn.Linear(1024, self.num_outputs))
-        )
-        self.critic_head = nn.Sequential(
-            init_(nn.Linear(1024, 1024)),
-            nn.ReLU(),
-            init_(nn.Linear(1024, 1))
-        )
+        self._features = None
 
-    def initial_state(self, batch_size):
-        return tuple(torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size) for _ in range(2))
+    def _feature_size(self):
+        x = torch.zeros(1, *self.obs_shape)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        return int(np.prod(x.size()))
 
     def forward(self, input_dict, state, seq_lens):
-        image = input_dict['obs']['image']
-        direction = input_dict['obs']['direction']
-        mission = input_dict['obs']['mission']
 
-        # Process image
-        T, B, C, H, W = image.shape  # Assuming the image tensor has dimensions (batch_size, channels, height, width)
-        x = image.view(T * B, C, H, W).float()  # Flatten the batch and sequence dimensions
+        if state is None or len(state) == 0:
+            state = [torch.zeros(1, 32, 1024), torch.zeros(1, 32, 1024)]
 
-        x = self.feat_extract(x)
-        x = x.view(T * B, -1)
-        x = self.fc(x)
+        x = input_dict["obs"].float()  # Convert input to float
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
 
-        x = x.view(T, B, -1)
-        x, state = self.lstm(x, state)
-        x = x.contiguous().view(T * B, -1)
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
 
-        actor_logits = self.actor_head(x)
-        critic_value = self.critic_head(x)
+        # Debugging: Print state information
+        print(f"State before processing: {state}")
+        print(f"State length: {len(state)}")
 
-        if self.training:
-            action = torch.multinomial(F.softmax(actor_logits, dim=1), num_samples=1)
+        # LSTM processing
+        batch_size = x.size(0)
+        if state is None or len(state) < 2 or state[0] is None or state[1] is None:
+            hx = torch.zeros(1, batch_size, 1024, device=x.device)
+            cx = torch.zeros(1, batch_size, 1024, device=x.device)
         else:
-            action = torch.argmax(actor_logits, dim=1)
+            hx, cx = state
+            if len(hx.shape) != 3:
+                hx = hx.view(1, batch_size, 1024).contiguous()
+            if len(cx.shape) != 3:
+                cx = cx.view(1, batch_size, 1024).contiguous()
 
-        actor_logits = actor_logits.view(T, B, self.num_actions)
-        critic_value = critic_value.view(T, B)
-        action = action.view(T, B)
+        x, (hx, cx) = self.lstm(x.unsqueeze(1), (hx, cx))  # Adjust sequence dimension
 
-        return dict(policy_logits=actor_logits, baseline=critic_value, action=action), state
+        self._features = x.squeeze(1)
+        logits = self.actor_head(self._features)
+        value = self.critic_head(self._features)
+
+        # Debugging: Print state information after processing
+        print(f"State after processing: {[hx.squeeze(0), cx.squeeze(0)]}")
+
+        return logits, [hx.squeeze(0), cx.squeeze(0)]
 
     def value_function(self):
-        return self.critic_head
+        assert self._features is not None, "must call forward() first"
+        return self.critic_head(self._features).squeeze(1)
 
     def get_initial_state(self):
-        h, c = [torch.zeros(1, self.lstm.hidden_size)] * 2
-        return [h, c]
+        # Return initial hidden states for LSTM
+        h = [torch.zeros(1, 1, 1024), torch.zeros(1, 1, 1024)]
+        return h
