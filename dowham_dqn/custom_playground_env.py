@@ -12,7 +12,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15):
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.dowham_reward = DoWhaMIntrinsicReward(eta, H, tau)
-        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size)
+        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size, render_mode='human')
 
         # Define the observation space to include image, direction, and mission
         self.observation_space = Dict({
@@ -22,8 +22,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         })
         self.carrying = Key('yellow')
         self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
-
-
 
     @staticmethod
     def _gen_mission():

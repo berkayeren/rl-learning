@@ -6,36 +6,11 @@ from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.models import ModelCatalog
 from ray.tune import register_env
 
-from dowham_dqn.custom_dqn_model import CustomDQNModel, CustomMinigridPolicyNet
+from dowham_dqn.custom_dqn_model import MinigridPolicyNet
 from dowham_dqn.custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True)
-
-# class CustomFlatObsWrapper(FlatObsWrapper):
-#     def __init__(self, env):
-#         super().__init__(env)
-#
-#
-# def env_creator(env_config=None):
-#     config = {
-#         "agent_start_pos": (1, 1),
-#         "agent_start_dir": 0,
-#         "goal_pos": (15, 15),
-#         "minNumRooms": 2,
-#         "maxNumRooms": 5,
-#         "enable_dowham": True,
-#         "max_episode_steps": 1000,
-#         **env_config
-#     }
-#     env = CustomPlaygroundEnv()
-#     env.reset()
-#     env = CustomFlatObsWrapper(env)
-#     return env
-
-
-# Register the custom environment
-# register_env("my_minigrid_env", env_creator)
 
 # Register the custom environment
 register_env("MiniGrid-CustomPlayground-v0", lambda config: ImgObsWrapper(CustomPlaygroundEnv()))
@@ -58,7 +33,7 @@ config = (
         lr=1e-5,
         optimizer={"type": "RMSProp"},
         model={
-            "custom_model": "custom_minigrid",
+            "custom_model": "MinigridPolicyNet",
         },
         gamma=0.99,
         train_batch_size=32,
@@ -79,8 +54,7 @@ config = (
 )
 
 # Register the custom model
-ModelCatalog.register_custom_model("custom_dqn_model", CustomDQNModel)
-ModelCatalog.register_custom_model("custom_minigrid", CustomMinigridPolicyNet)
+ModelCatalog.register_custom_model("MinigridPolicyNet", MinigridPolicyNet)
 
 # Instantiate the DQN trainer
 dqn_trainer = DQN(config=config)
