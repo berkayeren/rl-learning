@@ -71,20 +71,13 @@ ModelCatalog.register_custom_model("MinigridPolicyNet", MinigridPolicyNet)
 dqn_trainer = DQN(config=config)
 
 if __name__ == "__main__":
-    # Register the custom environment
-    # register(
-    #     id='MiniGrid-CustomPlayground-v0',
-    #     entry_point=CustomPlaygroundEnv,
-    # )
-
-    dqn_trainer.restore("C:\\Users\\BerkayEren\\PycharmProjects\\rl-learning\\dowham_dqn\\checkpoint")
     # Training loop
     for i in range(1000):  # Number of training iterations
         print(f"Iteration {i}")
         result = dqn_trainer.train()
         print(f"Iteration {i} - Reward: {result['episode_reward_mean']}")
         # Save the trained model
-        checkpoint = dqn_trainer.save("C:\\Users\\BerkayEren\\PycharmProjects\\rl-learning\\dowham_dqn\\checkpoint")
+        checkpoint = dqn_trainer.save("C:\\Users\\BerkayEren\\PycharmProjects\\rl-learning\\dowham_dqn\\checkpoint2")
 
     # Shutdown Ray
     ray.shutdown()

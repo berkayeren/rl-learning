@@ -108,12 +108,8 @@ class DoWhaMIntrinsicReward:
         if action not in self.effectiveness_counts[obs]:
             self.effectiveness_counts[obs][action] = 0
 
-        if state_changed and self.effectiveness_counts[obs][action] == 0 and self.state_visit_counts.get(next_obs,
-                                                                                                         0) == 0:
-            self.effectiveness_counts[obs][action] = 1
-
-        if state_changed and self.effectiveness_counts[obs][action] == 1:
-            self.effectiveness_counts[obs][action] = 0
+        if state_changed and obs != next_obs:
+            self.effectiveness_counts[obs][action] += 1
 
     def calculate_bonus(self, obs, action):
         if obs not in self.usage_counts or obs not in self.effectiveness_counts:
@@ -136,12 +132,20 @@ class DoWhaMIntrinsicReward:
         self.state_visit_counts[current_obs] += 1
 
     def calculate_intrinsic_reward(self, obs, action, next_obs):
+        reward = 0.0
         if obs != next_obs:
+            if action == 3:
+                reward += 5.0  # Higher reward for taking the key
+            if action == 5:
+                reward += 10.0  # Higher reward for opening the door
+
             state_count = self.state_visit_counts[obs] ** self.tau
             action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
-            return intrinsic_reward
+            return intrinsic_reward + reward
         return 0.0
 
     def reset_episode(self):
+        self.usage_counts.clear()
+        self.effectiveness_counts.clear()
         self.state_visit_counts.clear()
