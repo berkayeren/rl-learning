@@ -14,7 +14,7 @@ def hash_dict(d):
         if isinstance(value, np.ndarray):
             value = value.tobytes()
         hashable_items.append((key, value))
-    return hash(tuple(sorted(hashable_items)))
+    return abs(hash(tuple(sorted(hashable_items))))
 
 
 class CustomPlaygroundEnv(MultiRoomEnv):
@@ -57,23 +57,22 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
     def step(self, action):
         current_state = self.agent_pos
+        current_obs = self.gen_obs()
+        current_obs = hash_dict(current_obs)
         obs, reward, done, info, _ = super().step(action)
         next_state = self.agent_pos
-        hashed_obs = hash_dict(obs)
-        self.dowham_reward.update_state_visits(hashed_obs, next_state)
+        next_obs = hash_dict(obs)
+        self.dowham_reward.update_state_visits(current_obs, next_obs)
         state_changed = current_state != next_state
-        self.dowham_reward.update_usage(hashed_obs, action)
-        self.dowham_reward.update_effectiveness(hashed_obs, action, state_changed)
-        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(hashed_obs, action, current_state,
-                                                                         next_state)
+        self.dowham_reward.update_usage(current_obs, action)
+        self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
+        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs)
         reward += self.intrinsic_reward_scaling * intrinsic_reward
-
         obs = {
             'image': obs['image'],
             'direction': np.array(self.agent_dir, dtype=np.int64),
-            'mission': np.array([ord(c) for c in self.mission[:1]], dtype=np.uint8)  # Simplified mission representation
+            'mission': np.array([ord(c) for c in self.mission[:1]], dtype=np.uint8)
         }
-
         return obs, reward, done, info, {}
 
     def reset(self, **kwargs):
@@ -102,11 +101,19 @@ class DoWhaMIntrinsicReward:
             self.usage_counts[obs] = {}
         self.usage_counts[obs][action] = self.usage_counts[obs].get(action, 0) + 1
 
-    def update_effectiveness(self, obs, action, state_changed):
-        if state_changed:
-            if obs not in self.effectiveness_counts:
-                self.effectiveness_counts[obs] = {}
-            self.effectiveness_counts[obs][action] = self.effectiveness_counts[obs].get(action, 0) + 1
+    def update_effectiveness(self, obs, action, next_obs, state_changed):
+        if obs not in self.effectiveness_counts:
+            self.effectiveness_counts[obs] = {}
+
+        if action not in self.effectiveness_counts[obs]:
+            self.effectiveness_counts[obs][action] = 0
+
+        if state_changed and self.effectiveness_counts[obs][action] == 0 and self.state_visit_counts.get(next_obs,
+                                                                                                         0) == 0:
+            self.effectiveness_counts[obs][action] = 1
+
+        if state_changed and self.effectiveness_counts[obs][action] == 1:
+            self.effectiveness_counts[obs][action] = 0
 
     def calculate_bonus(self, obs, action):
         if obs not in self.usage_counts or obs not in self.effectiveness_counts:
@@ -119,14 +126,18 @@ class DoWhaMIntrinsicReward:
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
-    def update_state_visits(self, obs, state):
-        if obs not in self.state_visit_counts:
-            self.state_visit_counts[obs] = {}
-        self.state_visit_counts[obs][state] = self.state_visit_counts[obs].get(state, 0) + 1
+    def update_state_visits(self, current_obs, next_obs):
+        if current_obs not in self.state_visit_counts:
+            self.state_visit_counts[current_obs] = 0
 
-    def calculate_intrinsic_reward(self, obs, action, current_state, next_state):
-        if current_state != next_state:
-            state_count = self.state_visit_counts[obs][next_state] ** self.tau
+        if next_obs not in self.state_visit_counts:
+            self.state_visit_counts[next_obs] = 0
+
+        self.state_visit_counts[current_obs] += 1
+
+    def calculate_intrinsic_reward(self, obs, action, next_obs):
+        if obs != next_obs:
+            state_count = self.state_visit_counts[obs] ** self.tau
             action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
             return intrinsic_reward
