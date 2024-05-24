@@ -8,11 +8,20 @@ from minigrid.core.world_object import Goal, Door, Key
 from minigrid.envs import MultiRoomEnv
 
 
+def hash_dict(d):
+    hashable_items = []
+    for key, value in d.items():
+        if isinstance(value, np.ndarray):
+            value = value.tobytes()
+        hashable_items.append((key, value))
+    return hash(tuple(sorted(hashable_items)))
+
+
 class CustomPlaygroundEnv(MultiRoomEnv):
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15):
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.dowham_reward = DoWhaMIntrinsicReward(eta, H, tau)
-        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size, render_mode='human')
+        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size)
 
         # Define the observation space to include image, direction, and mission
         self.observation_space = Dict({
@@ -20,7 +29,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             'direction': Discrete(4),
             'mission': Box(low=0, high=255, shape=(1,), dtype=np.uint8)  # Simplified mission space for demonstration
         })
-        self.carrying = Key('yellow')
+        # self.carrying = Key('yellow')
         self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
 
     @staticmethod
@@ -39,22 +48,24 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.put_obj(Door('yellow'), width // 2, 3 * height // 4)  # Door in the lower part of the vertical wall
         self.put_obj(Door('yellow'), width // 4, height // 2)  # Door in the left part of the horizontal wall
         self.put_obj(Door('yellow'), 3 * width // 4, height // 2)  # Door in the right part of the horizontal wall
+        self.put_obj(Key('yellow'), 3, 3)
         self.agent_pos = (1, 1)
-        self.put_obj(Goal(), 7, 7)
+        self.put_obj(Goal(), 14, 7)
 
         self.agent_dir = random.randint(0, 3)
         self.mission = "traverse the rooms to get to the goal"
 
     def step(self, action):
-        print('step')
         current_state = self.agent_pos
         obs, reward, done, info, _ = super().step(action)
         next_state = self.agent_pos
-        self.dowham_reward.update_state_visits(next_state)
+        hashed_obs = hash_dict(obs)
+        self.dowham_reward.update_state_visits(hashed_obs, next_state)
         state_changed = current_state != next_state
-        self.dowham_reward.update_usage(action)
-        self.dowham_reward.update_effectiveness(action, state_changed)
-        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(action, current_state, next_state)
+        self.dowham_reward.update_usage(hashed_obs, action)
+        self.dowham_reward.update_effectiveness(hashed_obs, action, state_changed)
+        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(hashed_obs, action, current_state,
+                                                                         next_state)
         reward += self.intrinsic_reward_scaling * intrinsic_reward
 
         obs = {
@@ -86,28 +97,37 @@ class DoWhaMIntrinsicReward:
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
 
-    def update_usage(self, action):
-        self.usage_counts[action] = self.usage_counts.get(action, 0) + 1
+    def update_usage(self, obs, action):
+        if obs not in self.usage_counts:
+            self.usage_counts[obs] = {}
+        self.usage_counts[obs][action] = self.usage_counts[obs].get(action, 0) + 1
 
-    def update_effectiveness(self, action, state_changed):
+    def update_effectiveness(self, obs, action, state_changed):
         if state_changed:
-            self.effectiveness_counts[action] = self.effectiveness_counts.get(action, 0) + 1
+            if obs not in self.effectiveness_counts:
+                self.effectiveness_counts[obs] = {}
+            self.effectiveness_counts[obs][action] = self.effectiveness_counts[obs].get(action, 0) + 1
 
-    def calculate_bonus(self, action):
-        U = self.usage_counts.get(action, 1)
-        E = self.effectiveness_counts.get(action, 0)
+    def calculate_bonus(self, obs, action):
+        if obs not in self.usage_counts or obs not in self.effectiveness_counts:
+            return 0
+
+        U = self.usage_counts[obs].get(action, 1)
+        E = self.effectiveness_counts[obs].get(action, 0)
         term = (E ** self.H) / (U ** self.H)
         exp_term = self.eta ** (1 - term)
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
-    def update_state_visits(self, state):
-        self.state_visit_counts[state] = self.state_visit_counts.get(state, 0) + 1
+    def update_state_visits(self, obs, state):
+        if obs not in self.state_visit_counts:
+            self.state_visit_counts[obs] = {}
+        self.state_visit_counts[obs][state] = self.state_visit_counts[obs].get(state, 0) + 1
 
-    def calculate_intrinsic_reward(self, action, current_state, next_state):
+    def calculate_intrinsic_reward(self, obs, action, current_state, next_state):
         if current_state != next_state:
-            state_count = self.state_visit_counts.get(next_state, 1) ** self.tau
-            action_bonus = self.calculate_bonus(action)
+            state_count = self.state_visit_counts[obs][next_state] ** self.tau
+            action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
             return intrinsic_reward
         return 0.0
