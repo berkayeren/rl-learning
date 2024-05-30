@@ -1,11 +1,18 @@
 import argparse
 import os
+from typing import Optional, Union, Dict
 
+import numpy as np
 import ray
 from minigrid.wrappers import ImgObsWrapper
+from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import DQN
+from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.algorithms.dqn import DQNConfig
+from ray.rllib.evaluation import Episode
+from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
+from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
 
 from dowham_dqn.custom_dqn_model import MinigridPolicyNet
@@ -16,6 +23,66 @@ ray.init(ignore_reinit_error=True)
 
 # Register the custom model
 ModelCatalog.register_custom_model("MinigridPolicyNet", MinigridPolicyNet)
+
+
+class AccuracyCallback(DefaultCallbacks):
+    def __init__(self):
+        super().__init__()
+        self.states = None
+        self.height = 0
+        self.width = 0
+
+    def on_episode_start(
+            self,
+            *,
+            worker: "RolloutWorker",
+            base_env: BaseEnv,
+            policies: Dict[PolicyID, Policy],
+            episode: Union[Episode, EpisodeV2],
+            env_index: Optional[int] = None,
+            **kwargs,
+    ) -> None:
+        super().on_episode_start(worker=worker, base_env=base_env, policies=policies, episode=episode,
+                                 env_index=env_index, **kwargs)
+        self.visited_states = set()
+        self.height = base_env.get_sub_environments()[0].unwrapped.height
+        self.width = base_env.get_sub_environments()[0].unwrapped.width
+        self.states = np.full((self.width, self.height), 0)
+
+    def on_episode_step(
+            self,
+            *,
+            worker: "RolloutWorker",
+            base_env: BaseEnv,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
+            episode: EpisodeV2,
+            env_index: Optional[int] = None,
+            **kwargs,
+    ) -> None:
+        # asd: ImgObsWrapper = base_env.get_sub_environments()
+        x, y = base_env.get_sub_environments()[0].unwrapped.agent_pos
+        self.states[x][y] += 1
+
+    def on_episode_end(
+            self,
+            *,
+            worker: "RolloutWorker",
+            base_env: BaseEnv,
+            policies: Dict[PolicyID, Policy],
+            episode: Union[Episode, EpisodeV2, Exception],
+            env_index: Optional[int] = None,
+            **kwargs,
+    ) -> None:
+        total_size = self.width * self.height
+        # Calculate the number of unique states visited by the agent
+        unique_states_visited = np.count_nonzero(self.states)
+
+        # Calculate the percentage of the environment the agent has visited
+        percentage_visited = (unique_states_visited / total_size) * 100
+
+        # Log the percentage
+        episode.custom_metrics["percentage_visited"] = percentage_visited
+
 
 if __name__ == "__main__":
 
@@ -56,6 +123,7 @@ if __name__ == "__main__":
                 "epsilon_timesteps": 10000,
             }
         )
+        .callbacks(AccuracyCallback)
         .training(
             lr=1e-5,  # Learning rate
             optimizer={
@@ -109,7 +177,8 @@ if __name__ == "__main__":
     for i in range(5000):  # Number of training iterations
         print(f"Iteration {i}")
         result = dqn_trainer.train()
-        print(f"Iteration {i} - Reward: {result['episode_reward_mean']}")
+        print(
+            f"Iteration {i} - Reward: {result['episode_reward_mean']}, Percentage Visited: {result['custom_metrics']['percentage_visited']}")
 
         if i % 100 == 0:
             # Save the model checkpoint

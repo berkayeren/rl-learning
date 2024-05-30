@@ -66,7 +66,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.dowham_reward.update_usage(current_obs, action)
         self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
         intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs, state_changed)
-        print(f"Current state: {current_state}, Next state: {next_state}, Intrinsic reward: {intrinsic_reward}")
         reward += self.intrinsic_reward_scaling * intrinsic_reward
         obs = {
             'image': obs['image'],
@@ -140,7 +139,6 @@ class DoWhaMIntrinsicReward:
 
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
         if position_changed or is_valid_action:
-            print(f"If the agent has moved to a new position or the action is invalid, calculate intrinsic reward")
             state_count = self.state_visit_counts[next_obs] ** self.tau
             action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
