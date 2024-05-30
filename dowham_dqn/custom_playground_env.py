@@ -18,10 +18,10 @@ def hash_dict(d):
 
 
 class CustomPlaygroundEnv(MultiRoomEnv):
-    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15):
+    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15, render_mode=None):
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.dowham_reward = DoWhaMIntrinsicReward(eta, H, tau)
-        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size)
+        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size, render_mode=render_mode)
 
         # Define the observation space to include image, direction, and mission
         self.observation_space = Dict({
@@ -57,16 +57,16 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
     def step(self, action):
         current_state = self.agent_pos
-        current_obs = self.gen_obs()
-        current_obs = hash_dict(current_obs)
+        current_obs = self.hash()
         obs, reward, done, info, _ = super().step(action)
         next_state = self.agent_pos
-        next_obs = hash_dict(obs)
+        next_obs = self.hash()
         self.dowham_reward.update_state_visits(current_obs, next_obs)
         state_changed = current_state != next_state
         self.dowham_reward.update_usage(current_obs, action)
         self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
-        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs)
+        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs, state_changed)
+        print(f"Current state: {current_state}, Next state: {next_state}, Intrinsic reward: {intrinsic_reward}")
         reward += self.intrinsic_reward_scaling * intrinsic_reward
         obs = {
             'image': obs['image'],
@@ -108,7 +108,7 @@ class DoWhaMIntrinsicReward:
         if action not in self.effectiveness_counts[obs]:
             self.effectiveness_counts[obs][action] = 0
 
-        if state_changed and obs != next_obs:
+        if state_changed or obs != next_obs:
             self.effectiveness_counts[obs][action] += 1
 
     def calculate_bonus(self, obs, action):
@@ -129,17 +129,19 @@ class DoWhaMIntrinsicReward:
         if next_obs not in self.state_visit_counts:
             self.state_visit_counts[next_obs] = 0
 
-        self.state_visit_counts[current_obs] += 1
+        self.state_visit_counts[next_obs] += 1
 
-    def calculate_intrinsic_reward(self, obs, action, next_obs):
+    def calculate_intrinsic_reward(self, obs, action, next_obs, position_changed):
         reward = 0.0
-        if obs != next_obs:
-            if action == 3:
-                reward += 5.0  # Higher reward for taking the key
-            if action == 5:
-                reward += 10.0  # Higher reward for opening the door
 
-            state_count = self.state_visit_counts[obs] ** self.tau
+        is_valid_action = False
+        if action not in [0, 1, 2] and obs == next_obs:
+            is_valid_action = True
+
+        # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
+        if position_changed or is_valid_action:
+            print(f"If the agent has moved to a new position or the action is invalid, calculate intrinsic reward")
+            state_count = self.state_visit_counts[next_obs] ** self.tau
             action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
             return intrinsic_reward + reward
