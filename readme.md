@@ -11,8 +11,8 @@ purposes.
 
 ### Prerequisites
 
-The project requires Python and pip installed on your machine. You can download Python
-from [here](https://www.python.org/downloads/) and pip is included in Python 3.4 and later versions.
+The project requires Python 3.9.13 and pip installed on your machine. You can download Python
+from [here](https://www.python.org/downloads/) and pip is included in Python 3.9 and later versions.
 
 ### Installing
 

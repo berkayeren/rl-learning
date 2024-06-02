@@ -1,4 +1,5 @@
 import random
+from collections import defaultdict
 
 import numpy as np
 from gymnasium.envs.registration import EnvSpec
@@ -18,9 +19,30 @@ def hash_dict(d):
 
 
 class CustomPlaygroundEnv(MultiRoomEnv):
-    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15, render_mode=None):
+    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15, render_mode=None, **kwargs):
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
-        self.dowham_reward = DoWhaMIntrinsicReward(eta, H, tau)
+        self.enable_dowham_reward = kwargs.pop('enable_dowham_reward', None)
+        self.enable_count_based = kwargs.pop('enable_count_based', None)
+        self.action_count = {
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 0,
+            6: 0,
+        }
+
+        if self.enable_dowham_reward:
+            print("Enabling DoWhaM intrinsic reward")
+            self.dowham_reward = DoWhaMIntrinsicReward(eta, H, tau)
+            self.intrinsic_reward = 0.0
+
+        if self.enable_count_based:
+            print("Enabling count-based exploration")
+            self.count_exploration = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
+            self.count_bonus = 0.0
+
         super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size, render_mode=render_mode)
 
         # Define the observation space to include image, direction, and mission
@@ -56,18 +78,28 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.mission = "traverse the rooms to get to the goal"
 
     def step(self, action):
+        self.action_count[action] += 1
         current_state = self.agent_pos
         current_obs = self.hash()
         obs, reward, done, info, _ = super().step(action)
         next_state = self.agent_pos
         next_obs = self.hash()
-        self.dowham_reward.update_state_visits(current_obs, next_obs)
-        state_changed = current_state != next_state
-        self.dowham_reward.update_usage(current_obs, action)
-        self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
-        intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs, state_changed)
-        print(f"Current state: {current_state}, Next state: {next_state}, Intrinsic reward: {intrinsic_reward}")
-        reward += self.intrinsic_reward_scaling * intrinsic_reward
+
+        if self.enable_dowham_reward:
+            self.dowham_reward.update_state_visits(current_obs, next_obs)
+            state_changed = current_state != next_state
+            self.dowham_reward.update_usage(current_obs, action)
+            self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
+            intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs,
+                                                                             state_changed)
+            self.intrinsic_reward = self.intrinsic_reward_scaling * intrinsic_reward
+            reward += self.intrinsic_reward
+
+        if self.enable_count_based:
+            bonus = self.count_exploration.update(current_obs, action, reward, next_obs)
+            self.count_bonus = bonus
+            reward += bonus
+
         obs = {
             'image': obs['image'],
             'direction': np.array(self.agent_dir, dtype=np.int64),
@@ -76,7 +108,22 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         return obs, reward, done, info, {}
 
     def reset(self, **kwargs):
-        self.dowham_reward.reset_episode()
+        if self.enable_dowham_reward:
+            self.dowham_reward.reset_episode()
+
+        if self.enable_count_based:
+            self.count_exploration.reset()
+
+        self.action_count = {
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 0,
+            6: 0,
+        }
+
         obs = super().reset(**kwargs)
         obs = {
             'image': obs[0]['image'],
@@ -85,6 +132,39 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         }
 
         return obs, {}
+
+
+class Count:
+    def __init__(self):
+        self.counts = defaultdict(int)
+
+    def increment(self, state, action):
+        self.counts[(state, action)] += 1
+
+    def get_count(self, state, action):
+        return self.counts[(state, action)]
+
+
+class CountExploration:
+    def __init__(self, env, gamma=0.99, epsilon=0.1, alpha=0.1):
+        self.env = env
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.alpha = alpha
+        self.count = Count()
+        self.q_table = defaultdict(lambda: np.zeros(env.action_space.n))
+
+    def update(self, state, action, reward, next_state):
+        self.count.increment(state, action)
+        count = self.count.get_count(state, action)
+        bonus = 1.0 / np.sqrt(count)
+        self.q_table[state][action] += self.alpha * (
+                reward + self.gamma * np.max(self.q_table[next_state]) - self.q_table[state][action] + bonus)
+        return bonus
+
+    def reset(self):
+        self.count = Count()
+        self.q_table = defaultdict(lambda: np.zeros(self.env.action_space.n))
 
 
 class DoWhaMIntrinsicReward:
@@ -140,7 +220,6 @@ class DoWhaMIntrinsicReward:
 
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
         if position_changed or is_valid_action:
-            print(f"If the agent has moved to a new position or the action is invalid, calculate intrinsic reward")
             state_count = self.state_visit_counts[next_obs] ** self.tau
             action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
