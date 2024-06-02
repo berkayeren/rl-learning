@@ -19,7 +19,7 @@ from dowham_dqn.custom_dqn_model import MinigridPolicyNet
 from dowham_dqn.custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
-ray.init(ignore_reinit_error=True)
+ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
 
 # Register the custom model
 ModelCatalog.register_custom_model("MinigridPolicyNet", MinigridPolicyNet)
@@ -59,9 +59,15 @@ class AccuracyCallback(DefaultCallbacks):
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
-        # asd: ImgObsWrapper = base_env.get_sub_environments()
+        env = base_env.get_sub_environments()[0].unwrapped
         x, y = base_env.get_sub_environments()[0].unwrapped.agent_pos
         self.states[x][y] += 1
+
+        if hasattr(env, "dowham_reward") and hasattr(env, "intrinsic_reward"):
+            episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
+
+        if hasattr(env, "count_exploration") and hasattr(env, "count_bonus"):
+            episode.custom_metrics["count_bonus"] = env.count_bonus
 
     def on_episode_end(
             self,
@@ -73,6 +79,7 @@ class AccuracyCallback(DefaultCallbacks):
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
+        env = base_env.get_sub_environments()[0].unwrapped
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)
@@ -82,6 +89,13 @@ class AccuracyCallback(DefaultCallbacks):
 
         # Log the percentage
         episode.custom_metrics["percentage_visited"] = percentage_visited
+        episode.custom_metrics["left"] = env.action_count[0]
+        episode.custom_metrics["right"] = env.action_count[1]
+        episode.custom_metrics["forward"] = env.action_count[2]
+        episode.custom_metrics["pickup"] = env.action_count[3]
+        episode.custom_metrics["drop"] = env.action_count[4]
+        episode.custom_metrics["toggle"] = env.action_count[5]
+        episode.custom_metrics["done"] = env.action_count[6]
 
 
 if __name__ == "__main__":
@@ -94,6 +108,12 @@ if __name__ == "__main__":
     parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of environments per worker', default=0)
+    parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
+
+    algo = {
+        0: {"enable_dowham_reward": True},
+        1: {"enable_count_based": True}
+    }
 
     # Parse the arguments
     args = parser.parse_args()
@@ -106,7 +126,7 @@ if __name__ == "__main__":
 
     # Register the custom environment
     register_env("MiniGrid-CustomPlayground-v0",
-                 lambda config: ImgObsWrapper(CustomPlaygroundEnv(render_mode=render_mode)))
+                 lambda config: ImgObsWrapper(CustomPlaygroundEnv(render_mode=render_mode, **algo[args.algo])))
 
     # Define the DQN configuration
     config = (
@@ -178,7 +198,8 @@ if __name__ == "__main__":
         print(f"Iteration {i}")
         result = dqn_trainer.train()
         print(
-            f"Iteration {i} - Reward: {result['episode_reward_mean']}, Percentage Visited: {result['custom_metrics']['percentage_visited']}")
+            f"Iteration {i} - Reward: {result}")
+        checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-{i}')
 
         if i % 100 == 0:
             # Save the model checkpoint
