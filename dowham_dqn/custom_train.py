@@ -194,7 +194,7 @@ if __name__ == "__main__":
     checkpoint_dir = os.path.join(current_dir, relative_path)
 
     # Training loop
-    for i in range(5000):  # Number of training iterations
+    for i in range(10**6):  # Number of training iterations
         print(f"Iteration {i}")
         result = dqn_trainer.train()
         print(
