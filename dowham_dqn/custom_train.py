@@ -15,8 +15,8 @@ from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
 
-from dowham_dqn.custom_dqn_model import MinigridPolicyNet
-from dowham_dqn.custom_playground_env import CustomPlaygroundEnv
+from custom_dqn_model import MinigridPolicyNet
+from custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
