@@ -112,7 +112,8 @@ if __name__ == "__main__":
 
     algo = {
         0: {"enable_dowham_reward": True},
-        1: {"enable_count_based": True}
+        1: {"enable_count_based": True},
+        2: {"enable_count_based": False, "enable_dowham_reward": False},
     }
 
     # Parse the arguments
@@ -194,7 +195,7 @@ if __name__ == "__main__":
     checkpoint_dir = os.path.join(current_dir, relative_path)
 
     # Training loop
-    for i in range(10**6):  # Number of training iterations
+    for i in range(50000):  # Number of training iterations
         print(f"Iteration {i}")
         result = dqn_trainer.train()
         print(
