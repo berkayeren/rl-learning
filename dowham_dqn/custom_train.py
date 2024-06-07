@@ -15,8 +15,8 @@ from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
 
-from dowham_dqn.custom_dqn_model import MinigridPolicyNet
-from dowham_dqn.custom_playground_env import CustomPlaygroundEnv
+from custom_dqn_model import MinigridPolicyNet
+from custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
@@ -195,16 +195,14 @@ if __name__ == "__main__":
     checkpoint_dir = os.path.join(current_dir, relative_path)
 
     # Training loop
-    for i in range(50000):  # Number of training iterations
+    for i in range(50001):  # Number of training iterations
         print(f"Iteration {i}")
         result = dqn_trainer.train()
-        print(
-            f"Iteration {i} - Reward: {result}")
-        checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-{i}')
+        checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
 
-        if i % 100 == 0:
+        if i % 10000 == 0:
             # Save the model checkpoint
-            checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-{i}')
+            checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}-{i}')
 
     # Shutdown Ray
     ray.shutdown()
