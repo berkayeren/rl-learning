@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from typing import Optional, Union, Dict
 
 import numpy as np
@@ -14,6 +15,7 @@ from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
+from tqdm import tqdm
 
 from custom_dqn_model import MinigridPolicyNet
 from custom_playground_env import CustomPlaygroundEnv
@@ -109,6 +111,9 @@ if __name__ == "__main__":
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of environments per worker', default=0)
     parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
+    parser.add_argument('--start', type=int, help='Start Index', default=0)
+    parser.add_argument('--end', type=int, help='End Index', default=50000)
+    parser.add_argument('--restore', type=int, help='Restore from checkpoint', default=True)
 
     algo = {
         0: {"enable_dowham_reward": True},
@@ -194,9 +199,14 @@ if __name__ == "__main__":
     # Join the current directory with the relative path
     checkpoint_dir = os.path.join(current_dir, relative_path)
 
+    if args.restore:
+        try:
+            dqn_trainer.restore(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
+        except ValueError:
+            sys.stdout.write("Checkpoint not found, starting from scratch.\n")
+
     # Training loop
-    for i in range(50001):  # Number of training iterations
-        print(f"Iteration {i}")
+    for i in tqdm(range(args.start, args.end + 1)):  # Number of training iterations
         result = dqn_trainer.train()
         checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
 
