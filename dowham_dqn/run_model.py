@@ -1,9 +1,11 @@
 import argparse
 import os
+import sys
 from datetime import datetime
 from typing import Optional, Union, Dict
 
 import numpy as np
+import pandas as pd
 import ray
 from minigrid.wrappers import ImgObsWrapper
 from ray.rllib import BaseEnv, Policy
@@ -219,27 +221,17 @@ if __name__ == "__main__":
     # Join the current directory with the relative path
     checkpoint_dir = os.path.join(current_dir, relative_path)
     dqn_trainer.restore(f'{checkpoint_dir}/checkpoint-50000')
-    done = False
-    action = None
-    reward = 0
+    env = ImgObsWrapper(CustomPlaygroundEnv(render_mode=None, **algo[args.algo]))
 
-    env = ImgObsWrapper(CustomPlaygroundEnv(render_mode=render_mode, **algo[args.algo]))
-
-    import pandas as pd
-
-    visited_states = {}
-    all_observations = []
-
-    for trial in range(0, 10):
+    for episode in range(0, 10):
         """
-        The training loop.
-        It runs for a specified number of trials.
-        In each trial, the agent interacts with the environment until the episode ends.
-        The agent's actions and the visited states are recorded.
+        Function to run a single episode.
         """
-        print(f"Trial {trial + 1}")
+        sys.stdout.write(f"Running episode {episode + 1}\n")
+        visited_states = {}
         done = False
         reward = 0
+        action = None
         observation, _ = env.reset()
 
         while not done:
@@ -253,10 +245,10 @@ if __name__ == "__main__":
 
             # Render the environment
             env.render()
+
         # Convert the dictionary to a DataFrame
         date_string = datetime.now().strftime("%Y-%m-%d-%H%M")
         df = pd.DataFrame(list(visited_states.items()))
-        df.to_csv(f'trail-algo{args.algo}-0_{date_string}.csv', index=False)
+        df.to_csv(f'trail-algo{args.algo}-{episode}_{date_string}.csv', index=False)
 
-        all_observations.append(visited_states)
     ray.shutdown()
