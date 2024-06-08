@@ -113,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
     parser.add_argument('--start', type=int, help='Start Index', default=0)
     parser.add_argument('--end', type=int, help='End Index', default=50000)
-    parser.add_argument('--restore', type=int, help='Restore from checkpoint', default=True)
+    parser.add_argument('--restore', type=bool, help='Restore from checkpoint', default=True)
 
     algo = {
         0: {"enable_dowham_reward": True},
