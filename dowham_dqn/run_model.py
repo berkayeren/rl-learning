@@ -136,6 +136,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of environments per worker', default=0)
     parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
+    parser.add_argument('--checkpoint', type=str, help='Checkpoint Directory', default=None)
 
     algo = {
         0: {"enable_dowham_reward": True},
@@ -220,7 +221,13 @@ if __name__ == "__main__":
 
     # Join the current directory with the relative path
     checkpoint_dir = os.path.join(current_dir, relative_path)
-    dqn_trainer.restore(f'{checkpoint_dir}/checkpoint-50000')
+
+    if args.checkpoint:
+        try:
+            dqn_trainer.restore(f'{checkpoint_dir}/{args.checkpoint}')
+        except ValueError:
+            sys.stdout.write("Checkpoint not found, starting from scratch.\n")
+
     env = ImgObsWrapper(CustomPlaygroundEnv(render_mode=None, **algo[args.algo]))
 
     for episode in range(0, 10):
@@ -243,8 +250,8 @@ if __name__ == "__main__":
             visited_states.setdefault(env.agent_pos, 0)
             visited_states[env.agent_pos] += 1
 
-            # Render the environment
-            env.render()
+            if render_mode == 'human':
+                env.render()
 
         # Convert the dictionary to a DataFrame
         date_string = datetime.now().strftime("%Y-%m-%d-%H%M")
