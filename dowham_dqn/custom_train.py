@@ -5,6 +5,8 @@ from typing import Optional, Union, Dict
 
 import numpy as np
 import ray
+import torch
+import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import DQN
@@ -15,10 +17,11 @@ from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
+from torch import optim
 from tqdm import tqdm
 
 from custom_dqn_model import MinigridPolicyNet
-from custom_playground_env import CustomPlaygroundEnv
+from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
@@ -71,6 +74,11 @@ class AccuracyCallback(DefaultCallbacks):
         if hasattr(env, "count_exploration") and hasattr(env, "count_bonus"):
             episode.custom_metrics["count_bonus"] = env.count_bonus
 
+    def preprocess_observation(self, obs):
+        image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
+        direction = torch.tensor([[obs["direction"]]], dtype=torch.float32)
+        return image, direction
+
     def on_episode_end(
             self,
             *,
@@ -98,6 +106,27 @@ class AccuracyCallback(DefaultCallbacks):
         episode.custom_metrics["drop"] = env.action_count[4]
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
+
+        for episode in env.episode_history:  # Iterate through all collected episodes
+            current_obs = episode["current_obs"]
+            action = episode["action"]
+
+            image, direction = self.preprocess_observation(current_obs)
+
+            env.prediction_optimizer.zero_grad()
+            outputs = env.prediction_net(image, direction)
+            loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
+            loss.backward()
+            env.prediction_optimizer.step()
+
+            # torch.save({
+            #     'epoch': 1,
+            #     'model_state_dict': env.prediction_net.state_dict(),
+            #     'optimizer_state_dict': env.prediction_optimizer.state_dict(),
+            #     'loss': loss.item(),
+            # }, 'model_checkpoint.pth')
+
+        print(list(env.prediction_net.parameters())[-1])
 
 
 if __name__ == "__main__":
@@ -130,9 +159,17 @@ if __name__ == "__main__":
     num_envs_per_worker = args.num_envs_per_worker
     num_gpus = args.num_gpus
 
+    net = MiniGridNet()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(net.parameters(), lr=0.001)
+
     # Register the custom environment
     register_env("MiniGrid-CustomPlayground-v0",
-                 lambda config: ImgObsWrapper(CustomPlaygroundEnv(render_mode=render_mode, **algo[args.algo])))
+                 lambda config: ImgObsWrapper(CustomPlaygroundEnv(render_mode=render_mode,
+                                                                  prediction_net=net,
+                                                                  prediction_criterion=criterion,
+                                                                  prediction_optimizer=optimizer,
+                                                                  **algo[args.algo])))
 
     # Define the DQN configuration
     config = (
@@ -208,7 +245,7 @@ if __name__ == "__main__":
     # Training loop
     for i in tqdm(range(args.start, args.end + 1)):  # Number of training iterations
         result = dqn_trainer.train()
-        checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
+        # checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
 
         if i % 10000 == 0:
             # Save the model checkpoint

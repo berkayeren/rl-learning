@@ -18,8 +18,42 @@ def hash_dict(d):
     return abs(hash(tuple(sorted(hashable_items))))
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class MiniGridNet(nn.Module):
+    def __init__(self):
+        super(MiniGridNet, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(32 * 7 * 7 + 1, 128)
+        self.fc2 = nn.Linear(128, 7)  # 7 possible actions
+
+    def forward(self, x, direction):
+        x = self.conv1(x)
+        x = torch.relu(x)
+        x = self.conv2(x)
+        x = torch.relu(x)
+        x = x.view(x.size(0), -1)
+        x = torch.cat((x, direction), dim=1)
+        x = self.fc1(x)
+        x = torch.relu(x)
+        x = self.fc2(x)
+        return x
+
+
 class CustomPlaygroundEnv(MultiRoomEnv):
-    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=15, render_mode=None, **kwargs):
+    def __init__(self, intrinsic_reward_scaling=0.3, eta=40, H=1, tau=0.5, size=7, render_mode=None,
+                 prediction_net=None,
+                 prediction_criterion=None,
+                 prediction_optimizer=None,
+                 **kwargs):
+        self.prediction_net = prediction_net
+        self.prediction_criterion = prediction_criterion
+        self.prediction_optimizer = prediction_optimizer
+
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.enable_dowham_reward = kwargs.pop('enable_dowham_reward', None)
         self.enable_count_based = kwargs.pop('enable_count_based', None)
@@ -42,6 +76,8 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             print("Enabling count-based exploration")
             self.count_exploration = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
             self.count_bonus = 0.0
+
+        self.episode_history = []
 
         super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size, render_mode=render_mode)
 
@@ -77,11 +113,46 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.agent_dir = random.randint(0, 3)
         self.mission = "traverse the rooms to get to the goal"
 
+    def preprocess_observation(self, obs):
+        image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
+        direction = torch.tensor([[obs["direction"]]], dtype=torch.float32)
+        return image, direction
+
+    def predict_action_with_probability(self, observation):
+        image, direction = self.preprocess_observation(observation)
+
+        with torch.no_grad():
+            logits = self.prediction_net(image, direction)
+
+            # Apply softmax to convert logits to probabilities
+            probabilities = F.softmax(logits, dim=1)
+
+            # Get the predicted action (index of max probability)
+            predicted_action = torch.argmax(probabilities, dim=1).item()
+
+            # Get the probability of the predicted action
+            predicted_probability = probabilities[0, predicted_action].item()
+
+        return predicted_action, predicted_probability
+
+    def get_all_action_probabilities(self, observation):
+        image, direction = self.preprocess_observation(observation)
+        image = image.unsqueeze(0)
+        direction = direction.unsqueeze(0)
+
+        with torch.no_grad():
+            logits = self.prediction_net(image, direction)
+            probabilities = F.softmax(logits, dim=1)
+
+        return probabilities[0].tolist()  # Convert to list for easy handling
+
     def step(self, action):
         self.action_count[action] += 1
         current_state = self.agent_pos
         current_obs = self.hash()
+        initial_observation = self.gen_obs()
         obs, reward, done, info, _ = super().step(action)
+        next_observation = self.gen_obs()
         next_state = self.agent_pos
         next_obs = self.hash()
 
@@ -105,9 +176,41 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             'direction': np.array(self.agent_dir, dtype=np.int64),
             'mission': np.array([ord(c) for c in self.mission[:1]], dtype=np.uint8)
         }
+
+        prediction_reward, predicted_action, prob = self.prediction_error(action, initial_observation)
+
+        self.episode_history.append(
+            {"current_obs": initial_observation, "agent_dir": self.agent_dir, "action": action, "reward": reward,
+             "next_obs": next_observation, "prediction_reward": prediction_reward, "predicted_action": predicted_action,
+             "prob": prob})
+        # Add the prediction-based reward to the total reward
+        reward += prediction_reward
+        # print(f'Prediction reward: {prediction_reward:.4f}, Reward: {reward:.4f}')
+
         return obs, reward, done, info, {}
 
+    def prediction_error(self, action, initial_observation):
+        predicted_action, prob = self.predict_action_with_probability(initial_observation)
+        # print(f"Action:{action}, Predicted action: {predicted_action}, with probability: {prob:.4f}")
+        # Prediction-based reward shaping
+        prediction_reward_scale = 0.3  # Adjust this value to control the impact of the prediction reward
+        if action == predicted_action:
+            prediction_reward = prediction_reward_scale * prob
+            # print(f"Action matches prediction. Bonus reward: {prediction_reward:.4f}")
+        else:
+            prediction_reward = -prediction_reward_scale * (1 - prob)
+            # print(f"Action doesn't match prediction. Penalty: {prediction_reward:.4f}")
+        # Exploration encouragement
+        exploration_threshold = 0.3  # Adjust this value based on your needs
+        exploration_bonus_scale = 0.05  # Adjust this value to control the impact of the exploration bonus
+        if prob < exploration_threshold and action != predicted_action:
+            exploration_bonus = exploration_bonus_scale * (1 - prob)
+            # print(f"Exploration bonus: {exploration_bonus:.4f}")
+            prediction_reward += exploration_bonus
+        return prediction_reward, predicted_action, prob
+
     def reset(self, **kwargs):
+        self.episode_history = []
         if self.enable_dowham_reward:
             self.dowham_reward.reset_episode()
 
