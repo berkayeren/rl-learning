@@ -74,6 +74,9 @@ class AccuracyCallback(DefaultCallbacks):
         if hasattr(env, "count_exploration") and hasattr(env, "count_bonus"):
             episode.custom_metrics["count_bonus"] = env.count_bonus
 
+        episode.custom_metrics["prediction_reward"] = env.prediction_reward
+        episode.custom_metrics["prediction_prob"] = env.prediction_prob
+
     def preprocess_observation(self, obs):
         image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
         direction = torch.tensor([[obs["direction"]]], dtype=torch.float32)
@@ -107,16 +110,25 @@ class AccuracyCallback(DefaultCallbacks):
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
 
-        for episode in env.episode_history:  # Iterate through all collected episodes
+        # Iterate through all collected episodes
+        for episode in env.episode_history:
+            # Extract the current observation from the episode
             current_obs = episode["current_obs"]
+            # Extract the action taken in the episode
             action = episode["action"]
 
+            # Preprocess the current observation to get the image and direction tensors
             image, direction = self.preprocess_observation(current_obs)
 
+            # Zero the gradients of the prediction optimizer
             env.prediction_optimizer.zero_grad()
+            # Perform a forward pass through the prediction network
             outputs = env.prediction_net(image, direction)
+            # Compute the loss between the network's output and the actual action taken
             loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
+            # Perform a backward pass to compute the gradients
             loss.backward()
+            # Update the model parameters using the computed gradients
             env.prediction_optimizer.step()
 
             # torch.save({
@@ -126,7 +138,7 @@ class AccuracyCallback(DefaultCallbacks):
             #     'loss': loss.item(),
             # }, 'model_checkpoint.pth')
 
-        print(list(env.prediction_net.parameters())[-1])
+        # print(list(env.prediction_net.parameters())[-1])
 
 
 if __name__ == "__main__":
@@ -245,7 +257,6 @@ if __name__ == "__main__":
     # Training loop
     for i in tqdm(range(args.start, args.end + 1)):  # Number of training iterations
         result = dqn_trainer.train()
-        # checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
 
         if i % 10000 == 0:
             # Save the model checkpoint

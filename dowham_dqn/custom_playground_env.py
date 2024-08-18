@@ -50,6 +50,8 @@ class CustomPlaygroundEnv(MultiRoomEnv):
                  prediction_criterion=None,
                  prediction_optimizer=None,
                  **kwargs):
+        self.prediction_prob = 0.0
+        self.prediction_reward = 0.0
         self.prediction_net = prediction_net
         self.prediction_criterion = prediction_criterion
         self.prediction_optimizer = prediction_optimizer
@@ -177,14 +179,16 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             'mission': np.array([ord(c) for c in self.mission[:1]], dtype=np.uint8)
         }
 
-        prediction_reward, predicted_action, prob = self.prediction_error(action, initial_observation)
+        self.prediction_reward, predicted_action, self.prediction_prob = self.prediction_error(action,
+                                                                                               initial_observation)
 
         self.episode_history.append(
             {"current_obs": initial_observation, "agent_dir": self.agent_dir, "action": action, "reward": reward,
-             "next_obs": next_observation, "prediction_reward": prediction_reward, "predicted_action": predicted_action,
-             "prob": prob})
+             "next_obs": next_observation, "prediction_reward": self.prediction_reward,
+             "predicted_action": predicted_action,
+             "prob": self.prediction_prob})
         # Add the prediction-based reward to the total reward
-        reward += prediction_reward
+        reward += self.prediction_reward
         # print(f'Prediction reward: {prediction_reward:.4f}, Reward: {reward:.4f}')
 
         return obs, reward, done, info, {}
