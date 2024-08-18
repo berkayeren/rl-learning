@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 from typing import Optional, Union, Dict
@@ -22,6 +23,14 @@ from tqdm import tqdm
 
 from custom_dqn_model import MinigridPolicyNet
 from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
+
+# Configure the logging
+logging.basicConfig(
+    filename='minigrid.log',  # Log file name
+    level=logging.DEBUG,  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
+    datefmt='%Y-%m-%d %H:%M:%S'  # Date format
+)
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
@@ -257,6 +266,9 @@ if __name__ == "__main__":
     # Training loop
     for i in tqdm(range(args.start, args.end + 1)):  # Number of training iterations
         result = dqn_trainer.train()
+        result["iteration"] = i
+
+        logging.info(result)
 
         if i % 10000 == 0:
             # Save the model checkpoint
