@@ -3,7 +3,7 @@ import os
 
 if __name__ == "__main__":
     # Directory path
-    base_path = r"C:\Users\berka\ray_results"
+    base_path = r"C:\Users\BerkayEren\PycharmProjects\rl-learning\new_rl_results"
 
     # Get list of all directories
     directories = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
