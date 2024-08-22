@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import logging
 import os
 import sys
@@ -10,7 +11,6 @@ import torch
 import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
 from ray.rllib import BaseEnv, Policy
-from ray.rllib.algorithms import DQN
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.algorithms.dqn import DQNConfig
 from ray.rllib.evaluation import Episode
@@ -24,27 +24,46 @@ from tqdm import tqdm
 from custom_dqn_model import MinigridPolicyNet
 from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
 
-# Configure the logging
-logging.basicConfig(
-    filename='minigrid.log',  # Log file name
-    level=logging.DEBUG,  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
-    datefmt='%Y-%m-%d %H:%M:%S'  # Date format
-)
-
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
 
 # Register the custom model
 ModelCatalog.register_custom_model("MinigridPolicyNet", MinigridPolicyNet)
 
+# Create the parser
+parser = argparse.ArgumentParser(description="Get the render mode parameter")
+
+# Add the arguments
+parser.add_argument('--render_mode', type=str, help='The render mode parameter', default=None)
+parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
+parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
+parser.add_argument('--num_gpus', type=int, help='The number of environments per worker', default=0)
+parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
+parser.add_argument('--start', type=int, help='Start Index', default=0)
+parser.add_argument('--end', type=int, help='End Index', default=50000)
+parser.add_argument('--restore', type=bool, help='Restore from checkpoint', default=True)
+parser.add_argument('--enable_prediction_reward', type=bool, help='Restore from checkpoint', default=False)
+parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
+
+# Parse the arguments
+args = parser.parse_args()
+
+# Get the current working directory
+current_dir = os.getcwd()
+
+# Append the output folder to the current file path
+output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_folder)
+
 
 class AccuracyCallback(DefaultCallbacks):
-    def __init__(self):
+    training_iteration = 0  # Class-level attribute
+
+    def __init__(self, path=output_folder_path):
         super().__init__()
         self.states = None
         self.height = 0
         self.width = 0
+        self.path = path
 
     def on_episode_start(
             self,
@@ -101,6 +120,35 @@ class AccuracyCallback(DefaultCallbacks):
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
+        for env in base_env.get_sub_environments():
+            env = env.unwrapped
+            # Iterate through all collected episodes
+            for eh in env.episode_history:
+                # Extract the current observation from the episode
+                current_obs = eh["current_obs"]
+                # Extract the action taken in the episode
+                action = eh["action"]
+
+                # Preprocess the current observation to get the image and direction tensors
+                image, direction = self.preprocess_observation(current_obs)
+
+                # Zero the gradients of the prediction optimizer
+                env.prediction_optimizer.zero_grad()
+                # Perform a forward pass through the prediction network
+                outputs = env.prediction_net(image, direction)
+                # Compute the loss between the network's output and the actual action taken
+                loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
+                # Perform a backward pass to compute the gradients
+                loss.backward()
+                # Update the model parameters using the computed gradients
+                env.prediction_optimizer.step()
+
+        torch.save({
+            'model_state_dict': env.prediction_net.state_dict(),
+            'optimizer_state_dict': env.prediction_optimizer.state_dict(),
+        },
+            f'{os.path.join(self.path, "prediction_network")}/prediction_network_checkpoint.pth')
+
         env = base_env.get_sub_environments()[0].unwrapped
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
@@ -119,51 +167,18 @@ class AccuracyCallback(DefaultCallbacks):
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
 
-        # Iterate through all collected episodes
-        for episode in env.episode_history:
-            # Extract the current observation from the episode
-            current_obs = episode["current_obs"]
-            # Extract the action taken in the episode
-            action = episode["action"]
-
-            # Preprocess the current observation to get the image and direction tensors
-            image, direction = self.preprocess_observation(current_obs)
-
-            # Zero the gradients of the prediction optimizer
-            env.prediction_optimizer.zero_grad()
-            # Perform a forward pass through the prediction network
-            outputs = env.prediction_net(image, direction)
-            # Compute the loss between the network's output and the actual action taken
-            loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
-            # Perform a backward pass to compute the gradients
-            loss.backward()
-            # Update the model parameters using the computed gradients
-            env.prediction_optimizer.step()
-
-            # torch.save({
-            #     'epoch': 1,
-            #     'model_state_dict': env.prediction_net.state_dict(),
-            #     'optimizer_state_dict': env.prediction_optimizer.state_dict(),
-            #     'loss': loss.item(),
-            # }, 'model_checkpoint.pth')
-
-        # print(list(env.prediction_net.parameters())[-1])
-
 
 if __name__ == "__main__":
 
-    # Create the parser
-    parser = argparse.ArgumentParser(description="Get the render mode parameter")
-
-    # Add the arguments
-    parser.add_argument('--render_mode', type=str, help='The render mode parameter', default=None)
-    parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
-    parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
-    parser.add_argument('--num_gpus', type=int, help='The number of environments per worker', default=0)
-    parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
-    parser.add_argument('--start', type=int, help='Start Index', default=0)
-    parser.add_argument('--end', type=int, help='End Index', default=50000)
-    parser.add_argument('--restore', type=bool, help='Restore from checkpoint', default=True)
+    # Create the folder at output_folder_path if it does not exist
+    if not os.path.exists(output_folder_path):
+        os.makedirs(output_folder_path)
+    if not os.path.exists(os.path.join(output_folder_path, "prediction_network")):
+        os.makedirs(os.path.join(output_folder_path, "prediction_network"))
+    if not os.path.exists(os.path.join(output_folder_path, "results")):
+        os.makedirs(os.path.join(output_folder_path, "results"))
+    if not os.path.exists(os.path.join(output_folder_path, "checkpoint")):
+        os.makedirs(os.path.join(output_folder_path, "checkpoint"))
 
     algo = {
         0: {"enable_dowham_reward": True},
@@ -171,14 +186,12 @@ if __name__ == "__main__":
         2: {"enable_count_based": False, "enable_dowham_reward": False},
     }
 
-    # Parse the arguments
-    args = parser.parse_args()
-
     # Get the parameters
     render_mode = args.render_mode
     num_rollout_workers = args.num_rollout_workers
     num_envs_per_worker = args.num_envs_per_worker
     num_gpus = args.num_gpus
+    enable_prediction_reward = args.enable_prediction_reward
 
     net = MiniGridNet()
     criterion = nn.CrossEntropyLoss()
@@ -190,6 +203,7 @@ if __name__ == "__main__":
                                                                   prediction_net=net,
                                                                   prediction_criterion=criterion,
                                                                   prediction_optimizer=optimizer,
+                                                                  enable_prediction_reward=enable_prediction_reward,
                                                                   **algo[args.algo])))
 
     # Define the DQN configuration
@@ -234,28 +248,38 @@ if __name__ == "__main__":
         .resources(
             num_gpus=num_gpus,
             num_cpus_per_worker=1
-        )
-        .framework("torch").fault_tolerance(recreate_failed_workers=True, restart_failed_sub_environments=True)
-        # .evaluation(
-        #                 evaluation_parallel_to_training=False,
-        #                 evaluation_sample_timeout_s=320,
-        #                 evaluation_interval=10,
-        #                 evaluation_duration=4,
-        #                 evaluation_num_workers=0
-        #             )
-    )
+        ).framework("torch").fault_tolerance(recreate_failed_workers=True,
+                                             restart_failed_sub_environments=True))
+    # Get the current date and time
+    now = datetime.datetime.now()
 
-    # Instantiate the DQN trainer
-    dqn_trainer = DQN(config=config)
+    # Format the date and time
+    formatted_time = now.strftime("%Y-%m-%d_%H-%M")
+    config = config.to_dict()
+    config['logger_config'] = {
+        "type": "ray.tune.logger.UnifiedLogger",  # This is the default logger used
+        "logdir": os.path.join(output_folder_path, f'results/result_{formatted_time}'),
+    }
 
-    # Get the current working directory
-    current_dir = os.getcwd()
+    # Convert the dictionary back to DQNConfig
+    config = DQNConfig.from_dict(config)
+
+    # Initialize the DQN Trainer with the configured settings
+    dqn_trainer = config.build()
 
     # Define the relative path to the directory where you want to save the model
     relative_path = "checkpoint"
 
     # Join the current directory with the relative path
-    checkpoint_dir = os.path.join(current_dir, relative_path)
+    checkpoint_dir = os.path.join(output_folder_path, relative_path)
+
+    # Configure the logging
+    logging.basicConfig(
+        filename=f'{output_folder_path}/minigrid.log',  # Log file name
+        level=logging.DEBUG,  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
+        datefmt='%Y-%m-%d %H:%M:%S'  # Date format
+    )
 
     if args.restore:
         try:
