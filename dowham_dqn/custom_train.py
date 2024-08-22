@@ -296,7 +296,7 @@ if __name__ == "__main__":
 
         logging.info(result)
 
-        if i % 10000 == 0:
+        if i % 100000 == 0:
             # Save the model checkpoint
             checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}-{i}')
 
