@@ -122,36 +122,39 @@ class AccuracyCallback(DefaultCallbacks):
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
-        for env in base_env.get_sub_environments():
-            env = env.unwrapped
-            # Iterate through all collected episodes
-            for eh in env.episode_history:
-                # Extract the current observation from the episode
-                current_obs = eh["current_obs"]
-                # Extract the action taken in the episode
-                action = eh["action"]
+        env = base_env.get_sub_environments()[0].unwrapped
+        if env.enable_prediction_reward:
+            for env in base_env.get_sub_environments():
+                env = env.unwrapped
+                # Iterate through all collected episodes
+                for eh in env.episode_history:
+                    # Extract the current observation from the episode
+                    current_obs = eh["current_obs"]
+                    # Extract the action taken in the episode
+                    action = eh["action"]
 
-                # Preprocess the current observation to get the image and direction tensors
-                image, direction = self.preprocess_observation(current_obs)
+                    # Preprocess the current observation to get the image and direction tensors
+                    image, direction = self.preprocess_observation(current_obs)
 
-                # Zero the gradients of the prediction optimizer
-                env.prediction_optimizer.zero_grad()
-                # Perform a forward pass through the prediction network
-                outputs = env.prediction_net(image, direction)
-                # Compute the loss between the network's output and the actual action taken
-                loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
-                # Perform a backward pass to compute the gradients
-                loss.backward()
-                # Update the model parameters using the computed gradients
-                env.prediction_optimizer.step()
-
-        torch.save({
-            'model_state_dict': env.prediction_net.state_dict(),
-            'optimizer_state_dict': env.prediction_optimizer.state_dict(),
-        },
-            f'{os.path.join(self.path, "prediction_network")}/prediction_network_checkpoint.pth')
+                    # Zero the gradients of the prediction optimizer
+                    env.prediction_optimizer.zero_grad()
+                    # Perform a forward pass through the prediction network
+                    outputs = env.prediction_net(image, direction)
+                    # Compute the loss between the network's output and the actual action taken
+                    loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
+                    # Perform a backward pass to compute the gradients
+                    loss.backward()
+                    # Update the model parameters using the computed gradients
+                    env.prediction_optimizer.step()
+            # TODO: Save model every n episodes
+            torch.save({
+                'model_state_dict': env.prediction_net.state_dict(),
+                'optimizer_state_dict': env.prediction_optimizer.state_dict(),
+            },
+                f'{os.path.join(self.path, "prediction_network")}/prediction_network_checkpoint.pth')
 
         env = base_env.get_sub_environments()[0].unwrapped
+
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)
