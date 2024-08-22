@@ -185,6 +185,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(output_folder_path, "prediction_network"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "results"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "checkpoint"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder_path, "results", f"result_{formatted_time}"), exist_ok=True)
 
     algo = {
         0: {"enable_dowham_reward": True},
