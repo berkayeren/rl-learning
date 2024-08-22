@@ -170,16 +170,17 @@ class AccuracyCallback(DefaultCallbacks):
 
 
 if __name__ == "__main__":
+    # Get the current date and time
+    now = datetime.datetime.now()
+
+    # Format the date and time
+    formatted_time = now.strftime("%Y-%m-%d_%H-%M")
 
     # Create the folder at output_folder_path if it does not exist
-    if not os.path.exists(output_folder_path):
-        os.makedirs(output_folder_path)
-    if not os.path.exists(os.path.join(output_folder_path, "prediction_network")):
-        os.makedirs(os.path.join(output_folder_path, "prediction_network"))
-    if not os.path.exists(os.path.join(output_folder_path, "results")):
-        os.makedirs(os.path.join(output_folder_path, "results"))
-    if not os.path.exists(os.path.join(output_folder_path, "checkpoint")):
-        os.makedirs(os.path.join(output_folder_path, "checkpoint"))
+    os.makedirs(output_folder_path, exist_ok=True)
+    os.makedirs(os.path.join(output_folder_path, "prediction_network"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder_path, "results"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder_path, "checkpoint"), exist_ok=True)
 
     algo = {
         0: {"enable_dowham_reward": True},
@@ -251,11 +252,7 @@ if __name__ == "__main__":
             num_cpus_per_worker=1
         ).framework("torch").fault_tolerance(recreate_failed_workers=True,
                                              restart_failed_sub_environments=True))
-    # Get the current date and time
-    now = datetime.datetime.now()
 
-    # Format the date and time
-    formatted_time = now.strftime("%Y-%m-%d_%H-%M")
     config = config.to_dict()
     config['logger_config'] = {
         "type": "ray.tune.logger.UnifiedLogger",  # This is the default logger used
