@@ -44,6 +44,7 @@ parser.add_argument('--end', type=int, help='End Index', default=50000)
 parser.add_argument('--restore', type=bool, help='Restore from checkpoint', default=True)
 parser.add_argument('--enable_prediction_reward', type=bool, help='Restore from checkpoint', default=False)
 parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
+parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -192,7 +193,7 @@ if __name__ == "__main__":
     num_envs_per_worker = args.num_envs_per_worker
     num_gpus = args.num_gpus
     enable_prediction_reward = args.enable_prediction_reward
-
+    batch_size = args.batch_size
     net = MiniGridNet()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters(), lr=0.001)
@@ -235,7 +236,7 @@ if __name__ == "__main__":
                 "custom_model": "MinigridPolicyNet",
             },
             gamma=0.99,  # Discount factor
-            train_batch_size=32,  # Batch size
+            train_batch_size=batch_size,  # Batch size
             num_atoms=1,
             v_min=-10.0,
             v_max=10.0,
