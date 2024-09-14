@@ -43,6 +43,7 @@ parser.add_argument('--algo', type=int, help='The algorithm to use', default=0)
 parser.add_argument('--start', type=int, help='Start Index', default=0)
 parser.add_argument('--end', type=int, help='End Index', default=50000)
 parser.add_argument('--restore', type=bool, help='Restore from checkpoint', default=True)
+parser.add_argument('--checkpoint_path', type=str, help='Checkpoint Path', default='')
 parser.add_argument('--enable_prediction_reward', type=bool, help='Restore from checkpoint', default=False)
 parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
 parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
@@ -199,6 +200,7 @@ if __name__ == "__main__":
     num_envs_per_worker = args.num_envs_per_worker
     num_gpus = args.num_gpus
     enable_prediction_reward = args.enable_prediction_reward
+    checkpoint_path = args.checkpoint_path
     batch_size = args.batch_size
     net = MiniGridNet()
     criterion = nn.CrossEntropyLoss()
@@ -286,7 +288,7 @@ if __name__ == "__main__":
 
     if args.restore:
         try:
-            dqn_trainer.restore(f'{checkpoint_dir}/checkpoint-algo{args.algo}')
+            dqn_trainer.restore(checkpoint_path)
         except ValueError:
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
