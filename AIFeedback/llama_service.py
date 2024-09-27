@@ -1,10 +1,14 @@
+import os
+
 import torch
 from fastapi import FastAPI
 from huggingface_hub import login
 from pydantic import BaseModel
 from transformers import LlamaTokenizer, LlamaForCausalLM
 
-login(token="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")
+hf_token = os.getenv('HF_TOKEN')
+
+login(token=hf_token)
 model_name = 'openlm-research/open_llama_3b'
 
 tokenizer = LlamaTokenizer.from_pretrained(model_name)
