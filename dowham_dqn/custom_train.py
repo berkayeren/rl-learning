@@ -81,8 +81,8 @@ class AccuracyCallback(DefaultCallbacks):
         super().on_episode_start(worker=worker, base_env=base_env, policies=policies, episode=episode,
                                  env_index=env_index, **kwargs)
         self.visited_states = set()
-        self.height = base_env.get_sub_environments()[0].unwrapped.height
-        self.width = base_env.get_sub_environments()[0].unwrapped.width
+        self.height = base_env.get_sub_environments()[env_index].unwrapped.height
+        self.width = base_env.get_sub_environments()[env_index].unwrapped.width
         self.states = np.full((self.width, self.height), 0)
 
     def on_episode_step(
@@ -95,8 +95,8 @@ class AccuracyCallback(DefaultCallbacks):
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
-        env = base_env.get_sub_environments()[0].unwrapped
-        x, y = base_env.get_sub_environments()[0].unwrapped.agent_pos
+        env = base_env.get_sub_environments()[env_index].unwrapped
+        x, y = env.agent_pos
         self.states[x][y] += 1
 
         if hasattr(env, "dowham_reward") and hasattr(env, "intrinsic_reward"):
@@ -123,7 +123,7 @@ class AccuracyCallback(DefaultCallbacks):
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
-        env = base_env.get_sub_environments()[0].unwrapped
+        env = base_env.get_sub_environments()[env_index].unwrapped
         if env.enable_prediction_reward:
             for env in base_env.get_sub_environments():
                 env = env.unwrapped
@@ -153,8 +153,6 @@ class AccuracyCallback(DefaultCallbacks):
                 'optimizer_state_dict': env.prediction_optimizer.state_dict(),
             },
                 f'{os.path.join(self.path, "prediction_network")}/prediction_network_checkpoint.pth')
-
-        env = base_env.get_sub_environments()[0].unwrapped
 
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
