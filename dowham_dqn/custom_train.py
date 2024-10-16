@@ -107,6 +107,7 @@ class AccuracyCallback(DefaultCallbacks):
 
         episode.custom_metrics["prediction_reward"] = env.prediction_reward
         episode.custom_metrics["prediction_prob"] = env.prediction_prob
+        episode.custom_metrics["novelty_score"] = env.novelty_score
 
     def preprocess_observation(self, obs):
         image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)

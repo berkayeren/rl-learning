@@ -28,6 +28,15 @@ services:
       - prometheus
     networks:
       - monitoring
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - monitoring
 
 networks:
   monitoring:
@@ -35,3 +44,4 @@ networks:
 volumes:
   prometheus_data:
   grafana_data:
+  qdrant_data:

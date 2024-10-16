@@ -22,6 +22,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as rest
+
+# Initialize Qdrant client
+qdrant_client = QdrantClient(host='localhost', port=6333)
+
+# Define the vector size (dimensionality of your state vectors)
+VECTOR_SIZE = 150
+
+COLLECTION_NAME = 'state_vectors'
+
+# Check if the collection exists
+try:
+    qdrant_client.get_collection(COLLECTION_NAME)
+    print(f"Collection '{COLLECTION_NAME}' already exists.")
+except Exception as e:
+    print(f"Collection '{COLLECTION_NAME}' does not exist. Creating a new one.")
+    # Create a collection for states
+    qdrant_client.recreate_collection(
+        collection_name=COLLECTION_NAME,
+        vectors_config=rest.VectorParams(size=VECTOR_SIZE, distance=rest.Distance.COSINE)
+    )
+    print(f"Collection '{COLLECTION_NAME}' created.")
+
 
 class MiniGridNet(nn.Module):
     def __init__(self):
@@ -44,6 +68,15 @@ class MiniGridNet(nn.Module):
         return x
 
 
+def get_similar_states(state_vector, top_k=5):
+    search_result = qdrant_client.search(
+        collection_name='state_vectors',
+        query_vector=state_vector.tolist(),
+        limit=top_k
+    )
+    return search_result
+
+
 class CustomPlaygroundEnv(MultiRoomEnv):
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None,
                  prediction_net=None,
@@ -51,6 +84,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
                  prediction_optimizer=None,
                  enable_prediction_reward=False,
                  **kwargs):
+        self.novelty_score = 0.0
         self.enable_prediction_reward = enable_prediction_reward
         self.prediction_prob = 0.0
         self.prediction_reward = 0.0
@@ -160,15 +194,23 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         next_state = self.agent_pos
         next_obs = self.hash()
 
+        self.novelty_score, visit_count, state_vector = self.intrinsic_reward_similarity_score(obs)
+
         if self.enable_dowham_reward:
             self.dowham_reward.update_state_visits(current_obs, next_obs)
             state_changed = current_state != next_state
             self.dowham_reward.update_usage(current_obs, action)
             self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
             intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs,
-                                                                             state_changed)
-            self.intrinsic_reward = self.intrinsic_reward_scaling * intrinsic_reward
+                                                                             state_changed, visit_count)
+
+            novelty_weight = max(0.1,
+                                 1.0 - visit_count / (visit_count + 1))  # Decay novelty weight as visit count increases
+            self.intrinsic_reward = novelty_weight * self.novelty_score + self.intrinsic_reward_scaling * intrinsic_reward
             reward += self.intrinsic_reward
+            self.upsert_observation(action, self.novelty_score, reward, intrinsic_reward, state_vector, visit_count,
+                                    next_state[0],
+                                    next_state[1])
 
         if self.enable_count_based:
             bonus = self.count_exploration.update(current_obs, action, reward, next_obs)
@@ -194,6 +236,69 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             reward += self.prediction_reward
 
         return obs, reward, done, info, {}
+
+    def state_to_vector(self, state, x, y):
+        # Flatten the image
+        image = state['image'].flatten()
+        # Get direction
+        direction = np.array([state['direction']])
+
+        position = np.array([x, y])
+        # Concatenate all components
+        state_vector = np.concatenate([image, direction, position])
+        # Normalize the vector
+        norm = np.linalg.norm(state_vector)
+        if norm > 0:
+            state_vector = state_vector / norm
+        return [float(x) for x in state_vector]
+
+    def intrinsic_reward_similarity_score(self, next_obs):
+        x, y = self.agent_pos  # Current agent position
+
+        # Convert state to vector
+        state_vector = self.state_to_vector(next_obs, x, y)
+
+        # Query the vector database for similar states with filters
+        similar_states = qdrant_client.search(
+            collection_name='state_vectors',
+            query_vector=state_vector,
+            limit=1,  # Retrieve the most similar state
+            search_params=rest.SearchParams(
+                hnsw_ef=128  # Adjust ef parameter if needed
+            ),
+        )
+        visit_count = 0
+        # Compute the intrinsic reward based on similarity
+        if similar_states:
+            similarity_score = similar_states[0].score
+            visit_count = similar_states[0].payload.get('visit_count', 0)
+            similarity_score = np.clip(similarity_score, -1.0, 1.0)
+            novelty_score = 1 - similarity_score
+        else:
+            novelty_score = 1.0  # Max novelty if no similar states are found
+
+        return float(novelty_score), visit_count, state_vector
+
+    def upsert_observation(self, action, novelty_score, reward, intrinsic_reward, state_vector, visit_count, x, y):
+        qdrant_client.upsert(
+            collection_name='state_vectors',
+            points=[
+                rest.PointStruct(
+                    id=int(self.hash(), 16),
+                    vector=state_vector,
+                    payload={
+                        'action': int(action),
+                        'reward': float(reward),
+                        'intrinsic_reward': intrinsic_reward,
+                        'novelty_score': float(novelty_score),
+                        'obs': str(self.hash()),
+                        'visit_count': int(visit_count) + 1,
+                        'x': int(x),
+                        'y': int(y)
+                    }
+                )
+            ]
+        )
 
     def prediction_error(self, action, initial_observation):
         predicted_action, prob = self.predict_action_with_probability(initial_observation)
@@ -320,7 +425,7 @@ class DoWhaMIntrinsicReward:
 
         self.state_visit_counts[next_obs] += 1
 
-    def calculate_intrinsic_reward(self, obs, action, next_obs, position_changed):
+    def calculate_intrinsic_reward(self, obs, action, next_obs, position_changed, visit_count=0):
         reward = 0.0
 
         is_valid_action = False
@@ -329,7 +434,7 @@ class DoWhaMIntrinsicReward:
 
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
         if position_changed or is_valid_action:
-            state_count = self.state_visit_counts[next_obs] ** self.tau
+            state_count = visit_count ** self.tau
             action_bonus = self.calculate_bonus(obs, action)
             intrinsic_reward = action_bonus / np.sqrt(state_count)
             return intrinsic_reward + reward
