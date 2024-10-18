@@ -47,6 +47,7 @@ parser.add_argument('--checkpoint_path', type=str, help='Checkpoint Path', defau
 parser.add_argument('--enable_prediction_reward', type=bool, help='Restore from checkpoint', default=False)
 parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
 parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
+parser.add_argument('--checkpoint_size', type=int, help='Iteration Number to take checkpoint', default=100000)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -200,6 +201,7 @@ if __name__ == "__main__":
     enable_prediction_reward = args.enable_prediction_reward
     checkpoint_path = args.checkpoint_path
     batch_size = args.batch_size
+    checkpoint_size = args.checkpoint_size
     net = MiniGridNet()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters(), lr=0.001)
@@ -295,9 +297,7 @@ if __name__ == "__main__":
         result = dqn_trainer.train()
         result["iteration"] = i
 
-        logging.info(result)
-
-        if i % 100000 == 0:
+        if i % checkpoint_size == 0:
             # Save the model checkpoint
             checkpoint = dqn_trainer.save(f'{checkpoint_dir}/checkpoint-algo{args.algo}-{i}')
 
