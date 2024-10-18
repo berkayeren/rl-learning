@@ -51,6 +51,13 @@ class MinigridPolicyNet(TorchModelV2, nn.Module):
 
         self._features = None
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        print(f"Device: {self.device}")
+
+        # Move the model to the device
+        self.to(self.device)
+
     def _feature_size(self) -> int:
         """
         Calculate the output size of the convolutional layers.
@@ -77,7 +84,7 @@ class MinigridPolicyNet(TorchModelV2, nn.Module):
         Returns:
             Tuple[torch.Tensor, List[torch.Tensor]]: The output of the network and the new hidden states.
         """
-        x = input_dict["obs"].float()  # Convert input to float
+        x = input_dict["obs"].float().to(self.device)  # Convert input to float
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
@@ -89,10 +96,12 @@ class MinigridPolicyNet(TorchModelV2, nn.Module):
         # LSTM processing
         batch_size = x.size(0)
         if state is None or len(state) < 2 or state[0] is None or state[1] is None:
-            hx = torch.zeros(1, batch_size, 1024, device=x.device)
-            cx = torch.zeros(1, batch_size, 1024, device=x.device)
+            hx = torch.zeros(1, batch_size, 1024, device=self.device)
+            cx = torch.zeros(1, batch_size, 1024, device=self.device)
         else:
             hx, cx = state
+            hx = hx.to(self.device)
+            cx = cx.to(self.device)
             if len(hx.shape) != 3:
                 hx = hx.view(1, batch_size, 1024).contiguous()
             if len(cx.shape) != 3:
@@ -101,8 +110,8 @@ class MinigridPolicyNet(TorchModelV2, nn.Module):
         x, (hx, cx) = self.lstm(x.unsqueeze(1), (hx, cx))  # Adjust sequence dimension
 
         self._features = x.squeeze(1)
-        logits = self.actor_head(self._features)
-        value = self.critic_head(self._features)
+        logits = self.actor_head(self._features.to(self.device))
+        value = self.critic_head(self._features.to(self.device))
 
         return logits, [hx.squeeze(0), cx.squeeze(0)]
 
