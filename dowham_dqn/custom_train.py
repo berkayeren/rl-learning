@@ -215,6 +215,9 @@ if __name__ == "__main__":
                                                                   enable_prediction_reward=enable_prediction_reward,
                                                                   **algo[args.algo])))
 
+    total_cpus = os.cpu_count()
+    print(f"Total number of available CPUs: {total_cpus}")
+
     # Define the DQN configuration
     config = (
         DQNConfig()
@@ -256,7 +259,8 @@ if __name__ == "__main__":
         )
         .resources(
             num_gpus=num_gpus,
-            num_cpus_per_worker=1
+            num_cpus_per_worker=total_cpus / num_rollout_workers,
+            num_gpus_per_worker=num_gpus / num_rollout_workers,
         ).framework("torch").fault_tolerance(recreate_failed_workers=True,
                                              restart_failed_sub_environments=True))
 
