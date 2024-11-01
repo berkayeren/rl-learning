@@ -146,16 +146,22 @@ class NatureCNN(TorchModelV2, nn.Module):
         "Human-level control through deep reinforcement learning."
         Nature 518.7540 (2015): 529-533.
 
-    Adjusted to let RLlib handle device placement.
+    Adjusted to use the GPU if available by checking for CUDA.
     """
 
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
         # Initialize parents
-        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        TorchModelV2.__init__(
+            self, obs_space, action_space, num_outputs, model_config, name
+        )
         nn.Module.__init__(self)
 
+        # Determine device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Get the input channels from observation space
-        n_input_channels = obs_space.shape[0]  # Assuming observations are in [C, H, W] format
+        # Assuming observations are in [C, H, W] format
+        n_input_channels = obs_space.shape[0]
 
         # Define the CNN layers
         self.cnn = nn.Sequential(
@@ -163,13 +169,15 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0),  # Adjusted kernel_size
             nn.ReLU(),
         )
 
         # Compute the output size after the CNN layers
         with torch.no_grad():
-            sample_input = torch.zeros(1, *obs_space.shape)
+            sample_input = torch.zeros(
+                1, n_input_channels, obs_space.shape[1], obs_space.shape[2]
+            ).to(self.device)
             cnn_output = self.cnn(sample_input)
             n_flatten = cnn_output.view(1, -1).shape[1]
 
@@ -177,32 +185,35 @@ class NatureCNN(TorchModelV2, nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
-            nn.Linear(512, num_outputs)
+            nn.Linear(512, num_outputs),
         )
 
         # Value function head for the critic
         self.value_head = nn.Sequential(
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
-            nn.Linear(512, 1)
+            nn.Linear(512, 1),
         )
 
+        # Move the entire model to the device
+        self.to(self.device)
+
     def forward(self, input_dict, state, seq_lens):
-        # Get observations
-        obs = input_dict["obs"].float()
+        # Get observations and move to device
+        obs = input_dict["obs"].float().to(self.device)
         # If observations are in [B, H, W, C], permute to [B, C, H, W]
         if obs.shape[1:] != self.obs_space.shape:
             obs = obs.permute(0, 3, 1, 2)
         # Pass through CNN
         x = self.cnn(obs)
         x = x.view(x.size(0), -1)  # Flatten
+
         # Store features for value function
         self._features = x
+
         # Pass through fully connected layers
         logits = self.fc(x)
         return logits, state
 
     def value_function(self):
-        x = self._features
-        value = self.value_head(x)
-        return value.squeeze(1)
+        return self.value_head(self._features).squeeze(1)
