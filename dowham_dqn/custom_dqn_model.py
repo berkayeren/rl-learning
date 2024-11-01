@@ -212,7 +212,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         self._features = x
 
         # Pass through fully connected layers
-        logits = self.fc(x)
+        logits = self.fc(x.to(self.device))
         return logits, state
 
     def value_function(self):
