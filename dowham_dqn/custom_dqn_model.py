@@ -165,34 +165,34 @@ class NatureCNN(TorchModelV2, nn.Module):
 
         # Define the CNN layers
         self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=2, stride=1, padding=0).to(self.device),
-            nn.ReLU().to(self.device),
-            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0).to(self.device),
-            nn.ReLU().to(self.device),
-            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0).to(self.device),  # Adjusted kernel_size
-            nn.ReLU().to(self.device),
+            nn.Conv2d(n_input_channels, 32, kernel_size=2, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0),  # Adjusted kernel_size
+            nn.ReLU(),
         ).to(self.device)
 
         # Compute the output size after the CNN layers
         with torch.no_grad():
             sample_input = torch.zeros(
                 1, n_input_channels, obs_space.shape[1], obs_space.shape[2]
-            ).to(self.device)
+            )
             cnn_output = self.cnn(sample_input)
             n_flatten = cnn_output.view(1, -1).shape[1]
 
         # Define the fully connected layers
         self.fc = nn.Sequential(
-            nn.Linear(n_flatten, 512).to(self.device),
-            nn.ReLU().to(self.device),
-            nn.Linear(512, num_outputs).to(self.device),
+            nn.Linear(n_flatten, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_outputs),
         ).to(self.device)
 
         # Value function head for the critic
         self.value_head = nn.Sequential(
-            nn.Linear(n_flatten, 512).to(self.device),
-            nn.ReLU().to(self.device),
-            nn.Linear(512, 1).to(self.device),
+            nn.Linear(n_flatten, 512),
+            nn.ReLU(),
+            nn.Linear(512, 1),
         ).to(self.device)
 
         # Ensure that the entire model is on the device
