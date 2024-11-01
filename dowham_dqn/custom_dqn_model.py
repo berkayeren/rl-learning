@@ -169,7 +169,7 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0),  # Changed kernel_size to (1, 1)
+            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0),
             nn.ReLU(),
         )
 
@@ -196,13 +196,12 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.Linear(512, 1)
         )
 
-        # Move fully connected layers to the device
-        self.fc.to(self.device)
-        self.value_head.to(self.device)
+        # Move the entire model to the device
+        self.to(self.device)
 
     def forward(self, input_dict, state, seq_lens):
-        # Get observations
-        obs = input_dict["obs"].float()
+        # Get observations and move to device
+        obs = input_dict["obs"].float().to(self.device)
         # If observations are in [B, H, W, C], permute to [B, C, H, W]
         if obs.shape[1:] != self.obs_space.shape:
             obs = obs.permute(0, 3, 1, 2)
