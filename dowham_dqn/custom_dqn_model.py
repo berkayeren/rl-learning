@@ -146,8 +146,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         "Human-level control through deep reinforcement learning."
         Nature 518.7540 (2015): 529-533.
 
-    This class is rewritten to inherit from TorchModelV2 for use with RLlib.
-    Adjusted to use GPU if available.
+    Adjusted to let RLlib handle device placement.
     """
 
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
@@ -155,13 +154,8 @@ class NatureCNN(TorchModelV2, nn.Module):
         TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
         nn.Module.__init__(self)
 
-        # Determine device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         # Get the input channels from observation space
-        # Assuming the observations are in [C, H, W] format
-        # If not, you might need to permute the dimensions
-        n_input_channels = obs_space.shape[0]  # Channels first
+        n_input_channels = obs_space.shape[0]  # Assuming observations are in [C, H, W] format
 
         # Define the CNN layers
         self.cnn = nn.Sequential(
@@ -175,8 +169,8 @@ class NatureCNN(TorchModelV2, nn.Module):
 
         # Compute the output size after the CNN layers
         with torch.no_grad():
-            sample_input = torch.zeros(1, *obs_space.shape).to(self.device)
-            cnn_output = self.cnn(sample_input).to(self.device)
+            sample_input = torch.zeros(1, *obs_space.shape)
+            cnn_output = self.cnn(sample_input)
             n_flatten = cnn_output.view(1, -1).shape[1]
 
         # Define the fully connected layers
@@ -184,21 +178,18 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
             nn.Linear(512, num_outputs)
-        ).to(self.device)
+        )
 
         # Value function head for the critic
         self.value_head = nn.Sequential(
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
             nn.Linear(512, 1)
-        ).to(self.device)
-
-        # Move the entire model to the device
-        self.to(self.device)
+        )
 
     def forward(self, input_dict, state, seq_lens):
-        # Get observations and move to device
-        obs = input_dict["obs"].float().to(self.device)
+        # Get observations
+        obs = input_dict["obs"].float()
         # If observations are in [B, H, W, C], permute to [B, C, H, W]
         if obs.shape[1:] != self.obs_space.shape:
             obs = obs.permute(0, 3, 1, 2)
