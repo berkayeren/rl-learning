@@ -21,7 +21,7 @@ from ray.tune import register_env
 from torch import optim
 from tqdm import tqdm
 
-from custom_dqn_model import MinigridPolicyNet
+from custom_dqn_model import NatureCNN
 from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
 
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
@@ -29,7 +29,7 @@ os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
 
 # Register the custom model
-ModelCatalog.register_custom_model("MinigridPolicyNet", MinigridPolicyNet)
+ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
 
 # Create the parser
 parser = argparse.ArgumentParser(description="Get the render mode parameter")
@@ -126,28 +126,27 @@ class AccuracyCallback(DefaultCallbacks):
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
         if env.enable_prediction_reward:
-            for env in base_env.get_sub_environments():
-                env = env.unwrapped
-                # Iterate through all collected episodes
-                for eh in env.episode_history:
-                    # Extract the current observation from the episode
-                    current_obs = eh["current_obs"]
-                    # Extract the action taken in the episode
-                    action = eh["action"]
+            # Iterate through all collected episodes
+            for eh in env.episode_history:
+                # Extract the current observation from the episode
+                current_obs = eh["current_obs"]
+                # Extract the action taken in the episode
+                action = eh["action"]
 
-                    # Preprocess the current observation to get the image and direction tensors
-                    image, direction = self.preprocess_observation(current_obs)
+                # Preprocess the current observation to get the image and direction tensors
+                image, direction = self.preprocess_observation(current_obs)
 
-                    # Zero the gradients of the prediction optimizer
-                    env.prediction_optimizer.zero_grad()
-                    # Perform a forward pass through the prediction network
-                    outputs = env.prediction_net(image, direction)
-                    # Compute the loss between the network's output and the actual action taken
-                    loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
-                    # Perform a backward pass to compute the gradients
-                    loss.backward()
-                    # Update the model parameters using the computed gradients
-                    env.prediction_optimizer.step()
+                # Zero the gradients of the prediction optimizer
+                env.prediction_optimizer.zero_grad()
+                # Perform a forward pass through the prediction network
+                outputs = env.prediction_net(image, direction)
+                # Compute the loss between the network's output and the actual action taken
+                loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
+                # Perform a backward pass to compute the gradients
+                loss.backward()
+                # Update the model parameters using the computed gradients
+                env.prediction_optimizer.step()
+
             # TODO: Save model every n episodes
             torch.save({
                 'model_state_dict': env.prediction_net.state_dict(),

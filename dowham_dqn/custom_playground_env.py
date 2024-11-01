@@ -3,7 +3,6 @@ from collections import defaultdict
 
 import numpy as np
 from gymnasium.envs.registration import EnvSpec
-from gymnasium.spaces import Box, Dict, Discrete
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Door, Key
 from minigrid.envs import MultiRoomEnv
@@ -83,14 +82,8 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         self.episode_history = []
 
-        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, agent_view_size=size, render_mode=render_mode)
+        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, render_mode=render_mode)
 
-        # Define the observation space to include image, direction, and mission
-        self.observation_space = Dict({
-            'image': Box(low=0, high=255, shape=(size, size, 3), dtype=np.uint8),
-            'direction': Discrete(4),
-            'mission': Box(low=0, high=255, shape=(1,), dtype=np.uint8)  # Simplified mission space for demonstration
-        })
         # self.carrying = Key('yellow')
         self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
 
