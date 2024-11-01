@@ -177,7 +177,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         with torch.no_grad():
             sample_input = torch.zeros(
                 1, n_input_channels, obs_space.shape[1], obs_space.shape[2]
-            )
+            ).to(self.device)
             cnn_output = self.cnn(sample_input)
             n_flatten = cnn_output.view(1, -1).shape[1]
 
