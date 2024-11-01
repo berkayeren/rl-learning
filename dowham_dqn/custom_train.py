@@ -26,7 +26,7 @@ from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
 
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 # Initialize Ray
-ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
+ray.init(ignore_reinit_error=True)
 
 # Register the custom model
 ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
