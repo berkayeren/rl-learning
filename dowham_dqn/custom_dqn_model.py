@@ -165,12 +165,12 @@ class NatureCNN(TorchModelV2, nn.Module):
 
         # Define the CNN layers
         self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=2, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0),  # Adjusted kernel_size
-            nn.ReLU(),
+            nn.Conv2d(n_input_channels, 32, kernel_size=2, stride=1, padding=0).to(self.device),
+            nn.ReLU().to(self.device),
+            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0).to(self.device),
+            nn.ReLU().to(self.device),
+            nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0).to(self.device),  # Adjusted kernel_size
+            nn.ReLU().to(self.device),
         )
 
         # Move CNN layers to the device
