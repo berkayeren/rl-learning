@@ -176,7 +176,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         # Compute the output size after the CNN layers
         with torch.no_grad():
             sample_input = torch.zeros(1, *obs_space.shape).to(self.device)
-            cnn_output = self.cnn(sample_input)
+            cnn_output = self.cnn(sample_input).to(self.device)
             n_flatten = cnn_output.view(1, -1).shape[1]
 
         # Define the fully connected layers
@@ -184,14 +184,14 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
             nn.Linear(512, num_outputs)
-        )
+        ).to(self.device)
 
         # Value function head for the critic
         self.value_head = nn.Sequential(
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
             nn.Linear(512, 1)
-        )
+        ).to(self.device)
 
         # Move the entire model to the device
         self.to(self.device)
