@@ -297,8 +297,7 @@ if __name__ == "__main__":
 
     # Training loop
     for i in tqdm(range(args.start, args.end + 1)):  # Number of training iterations
-        result = dqn_trainer.train()
-        result["iteration"] = i
+        dqn_trainer.train()
 
         if i % checkpoint_size == 0:
             # Save the model checkpoint
