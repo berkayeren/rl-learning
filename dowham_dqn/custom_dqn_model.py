@@ -171,10 +171,7 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.ReLU().to(self.device),
             nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0).to(self.device),  # Adjusted kernel_size
             nn.ReLU().to(self.device),
-        )
-
-        # Move CNN layers to the device
-        self.cnn.to(self.device)
+        ).to(self.device)
 
         # Compute the output size after the CNN layers
         with torch.no_grad():
