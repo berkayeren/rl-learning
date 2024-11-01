@@ -173,9 +173,6 @@ class NatureCNN(TorchModelV2, nn.Module):
             nn.ReLU(),
         )
 
-        # Move CNN layers to the device
-        self.cnn.to(self.device)
-
         # Compute the output size after the CNN layers
         with torch.no_grad():
             sample_input = torch.zeros(1, *obs_space.shape).to(self.device)
@@ -205,8 +202,6 @@ class NatureCNN(TorchModelV2, nn.Module):
         # If observations are in [B, H, W, C], permute to [B, C, H, W]
         if obs.shape[1:] != self.obs_space.shape:
             obs = obs.permute(0, 3, 1, 2)
-        # Move observations to the device
-        obs = obs.to(self.device)
         # Pass through CNN
         x = self.cnn(obs)
         x = x.view(x.size(0), -1)  # Flatten
