@@ -1,6 +1,5 @@
 import argparse
 import datetime
-import logging
 import os
 import sys
 from typing import Optional, Union, Dict
@@ -10,6 +9,7 @@ import ray
 import torch
 import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
+from ray.experimental.tqdm_ray import tqdm
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.algorithms.dqn import DQNConfig
@@ -19,12 +19,13 @@ from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
 from torch import optim
-from tqdm import tqdm
 
 from custom_dqn_model import NatureCNN
 from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
 
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
+os.environ["RAY_DEDUP_LOGS"] = "0"
+
 # Initialize Ray
 ray.init(ignore_reinit_error=True)
 
@@ -106,8 +107,9 @@ class AccuracyCallback(DefaultCallbacks):
         if hasattr(env, "count_exploration") and hasattr(env, "count_bonus"):
             episode.custom_metrics["count_bonus"] = env.count_bonus
 
-        episode.custom_metrics["prediction_reward"] = env.prediction_reward
-        episode.custom_metrics["prediction_prob"] = env.prediction_prob
+        if hasattr(env, "enable_prediction_reward") and env.enable_prediction_reward:
+            episode.custom_metrics["prediction_reward"] = env.prediction_reward
+            episode.custom_metrics["prediction_prob"] = env.prediction_prob
 
     def preprocess_observation(self, obs):
         image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
@@ -280,14 +282,6 @@ if __name__ == "__main__":
 
     # Join the current directory with the relative path
     checkpoint_dir = os.path.join(output_folder_path, relative_path)
-
-    # Configure the logging
-    logging.basicConfig(
-        filename=f'{output_folder_path}/minigrid.log',  # Log file name
-        level=logging.DEBUG,  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
-        datefmt='%Y-%m-%d %H:%M:%S'  # Date format
-    )
 
     if args.restore:
         try:
