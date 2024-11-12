@@ -218,7 +218,7 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                 },
                 gamma=0.99,  # Discount factor
                 train_batch_size=args.batch_size,  # Batch size
-                sgd_minibatch_size=args.batch_size,
+                minibatch_size=args.batch_size,  # Batch size
                 num_sgd_iter=10,
                 use_gae=True,
                 lambda_=0.95,
@@ -233,7 +233,7 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
             )
             .framework("torch")
             .fault_tolerance(
-                recreate_failed_workers=True,
+                recreate_failed_env_runners=True,
                 restart_failed_sub_environments=True
             )
         )

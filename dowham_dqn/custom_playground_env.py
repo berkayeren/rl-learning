@@ -44,6 +44,12 @@ class MiniGridNet(nn.Module):
 
 
 class CustomPlaygroundEnv(MultiRoomEnv):
+    def __str__(self):
+        if self.agent_pos is None:
+            self.reset()
+
+        return super().__str__()
+
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None,
                  prediction_net=None,
                  prediction_criterion=None,
