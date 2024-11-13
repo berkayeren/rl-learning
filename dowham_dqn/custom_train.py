@@ -4,6 +4,7 @@ import os
 import sys
 from typing import Optional, Union, Dict
 
+import gym
 import numpy as np
 import ray
 import torch
@@ -12,8 +13,12 @@ from minigrid.wrappers import ImgObsWrapper
 from ray.experimental.tqdm_ray import tqdm
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.rllib.core.rl_module import RLModuleSpec, RLModule
+from ray.rllib.env.single_agent_episode import SingleAgentEpisode
+from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
-from ray.rllib.utils.typing import PolicyID
+from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
+from ray.rllib.utils.typing import PolicyID, EpisodeType
 from ray.tune import register_env
 from torch import optim
 
@@ -33,8 +38,10 @@ ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
 # Argument parser setup
 parser = argparse.ArgumentParser(description="Custom training script")
 parser.add_argument('--render_mode', type=str, help='The render mode parameter', default=None)
-parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
-parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
+parser.add_argument('--num_env_runners', type=int, help='Number of environment runners (was num_rollout_workers)',
+                    default=1)
+parser.add_argument('--num_envs_per_env_runner', type=int,
+                    help='Number of environments per env runner (was num_envs_per_worker)', default=1)
 parser.add_argument('--num_gpus', type=int, help='The number of GPUs', default=0)
 parser.add_argument('--algo', type=str, help='The algorithm to use (dqn or ppo)', default='dqn')
 parser.add_argument('--start', type=int, help='Start Index', default=0)
@@ -58,6 +65,7 @@ output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_fold
 class AccuracyCallback(DefaultCallbacks):
     def __init__(self, path=output_folder_path):
         super().__init__()
+        self.visited_states = None
         self.states = None
         self.height = 0
         self.width = 0
@@ -66,40 +74,48 @@ class AccuracyCallback(DefaultCallbacks):
     def on_episode_start(
             self,
             *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            policies: Dict[PolicyID, Policy],
-            episode: Union["Episode", "EpisodeV2"],
-            env_index: Optional[int] = None,
+            episode: Union[EpisodeType, EpisodeV2], env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
         self.visited_states = set()
-        self.height = base_env.get_sub_environments()[env_index].unwrapped.height
-        self.width = base_env.get_sub_environments()[env_index].unwrapped.width
+        self.height = env.envs[env_index].height
+        self.width = env.envs[env_index].width
         self.states = np.full((self.width, self.height), 0)
 
     def on_episode_step(
             self,
             *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            episode: "EpisodeV2",
-            env_index: Optional[int] = None,
+            episode: SingleAgentEpisode, env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
-        env = base_env.get_sub_environments()[env_index].unwrapped
+        env = env.envs[env_index].unwrapped
         x, y = env.agent_pos
         self.states[x][y] += 1
 
-        if hasattr(env, "intrinsic_reward"):
-            episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
+        ## if hasattr(env, "intrinsic_reward"):
+        ##     episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
 
-        if hasattr(env, "count_bonus"):
-            episode.custom_metrics["count_bonus"] = env.count_bonus
-
-        if hasattr(env, "enable_prediction_reward") and env.enable_prediction_reward:
-            episode.custom_metrics["prediction_reward"] = env.prediction_reward
-            episode.custom_metrics["prediction_prob"] = env.prediction_prob
+    ##
+    ## if hasattr(env, "count_bonus"):
+    ##     episode.custom_metrics["count_bonus"] = env.count_bonus
+    ##
+    ## if hasattr(env, "enable_prediction_reward") and env.enable_prediction_reward:
+    ##     episode.custom_metrics["prediction_reward"] = env.prediction_reward
+    ##     episode.custom_metrics["prediction_prob"] = env.prediction_prob
 
     def preprocess_observation(self, obs):
         image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
@@ -109,14 +125,18 @@ class AccuracyCallback(DefaultCallbacks):
     def on_episode_end(
             self,
             *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            policies: Dict[PolicyID, Policy],
-            episode: Union["Episode", "EpisodeV2"],
-            env_index: Optional[int] = None,
+            episode: Union[EpisodeType, EpisodeV2], env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            # TODO (sven): Deprecate these args.
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
-        env = base_env.get_sub_environments()[env_index].unwrapped
+        env = env.envs[env_index].unwrapped
         if env.enable_prediction_reward:
             for eh in env.episode_history:
                 current_obs = eh["current_obs"]
@@ -137,14 +157,14 @@ class AccuracyCallback(DefaultCallbacks):
         total_size = self.width * self.height
         unique_states_visited = np.count_nonzero(self.states)
         percentage_visited = (unique_states_visited / total_size) * 100
-        episode.custom_metrics["percentage_visited"] = percentage_visited
-        episode.custom_metrics["left"] = env.action_count[0]
-        episode.custom_metrics["right"] = env.action_count[1]
-        episode.custom_metrics["forward"] = env.action_count[2]
-        episode.custom_metrics["pickup"] = env.action_count[3]
-        episode.custom_metrics["drop"] = env.action_count[4]
-        episode.custom_metrics["toggle"] = env.action_count[5]
-        episode.custom_metrics["done"] = env.action_count[6]
+        # episode.custom_metrics["percentage_visited"] = percentage_visited
+        # episode.custom_metrics["left"] = env.action_count[0]
+        # episode.custom_metrics["right"] = env.action_count[1]
+        # episode.custom_metrics["forward"] = env.action_count[2]
+        # episode.custom_metrics["pickup"] = env.action_count[3]
+        # episode.custom_metrics["drop"] = env.action_count[4]
+        # episode.custom_metrics["toggle"] = env.action_count[5]
+        # episode.custom_metrics["done"] = env.action_count[6]
 
 
 def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, output_folder_path, formatted_time):
@@ -153,32 +173,17 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
         config = (
             DQNConfig()
             .environment(env="MiniGrid-CustomPlayground-v0")
-            .rollouts(
-                num_rollout_workers=args.num_rollout_workers,
-                num_envs_per_worker=args.num_envs_per_worker
-            )
-            .exploration(
-                explore=True,
-                exploration_config={
-                    "type": "EpsilonGreedy",
-                    "initial_epsilon": 1.0,
-                    "final_epsilon": 0.1,
-                    "epsilon_timesteps": 10000,
-                }
+            .env_runners(
+                num_env_runners=args.num_env_runners,
+                num_envs_per_env_runner=args.num_envs_per_env_runner,
+                num_cpus_per_env_runner=total_cpus / args.num_env_runners,
+                num_gpus_per_env_runner=args.num_gpus / args.num_env_runners,
+                sample_timeout_s=60,  # Increase sample timeout
+                rollout_fragment_length=50  # Decrease rollout fragment length
             )
             .callbacks(AccuracyCallback)
             .training(
                 lr=1e-5,  # Learning rate
-                optimizer={
-                    "type": "RMSProp",
-                    "lr": 1e-5,
-                    "weight_decay": 0,
-                    "momentum": 0,
-                    "centered": False
-                },
-                model={
-                    "custom_model": "MinigridPolicyNet",
-                },
                 gamma=0.99,  # Discount factor
                 train_batch_size=args.batch_size,  # Batch size
                 num_atoms=1,
@@ -190,14 +195,24 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                 n_step=3,  # N-step Q-learning
                 target_network_update_freq=500,
             )
+            .rl_module(
+                # Plug-in our custom RLModule class.
+                rl_module_spec=RLModuleSpec(
+                    module_class=NatureCNN,
+                ),
+            )
+            .api_stack(
+                enable_rl_module_and_learner=True,
+                enable_env_runner_and_connector_v2=True,
+            )
             .resources(
                 num_gpus=args.num_gpus,
-                num_cpus_per_worker=total_cpus / args.num_rollout_workers,
-                num_gpus_per_worker=args.num_gpus / args.num_rollout_workers,
+            ).reporting(
+                keep_per_episode_custom_metrics=True,
             )
             .framework("torch")
             .fault_tolerance(
-                recreate_failed_workers=True,
+                recreate_failed_env_runners=True,
                 restart_failed_sub_environments=True
             )
         )
@@ -206,9 +221,11 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
         config = (
             PPOConfig()
             .environment(env="MiniGrid-CustomPlayground-v0")
-            .rollouts(
-                num_rollout_workers=args.num_rollout_workers,
-                num_envs_per_worker=args.num_envs_per_worker
+            .env_runners(
+                num_env_runners=args.num_env_runners,
+                num_envs_per_env_runner=args.num_envs_per_env_runner,
+                num_cpus_per_env_runner=total_cpus / args.num_env_runners,
+                num_gpus_per_env_runner=args.num_gpus / args.num_env_runners,
             )
             .callbacks(AccuracyCallback)
             .training(
@@ -219,7 +236,6 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                 gamma=0.99,  # Discount factor
                 train_batch_size=args.batch_size,  # Batch size
                 minibatch_size=args.batch_size,  # Batch size
-                num_sgd_iter=10,
                 use_gae=True,
                 lambda_=0.95,
                 clip_param=0.2,
@@ -228,8 +244,8 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
             )
             .resources(
                 num_gpus=args.num_gpus,
-                num_cpus_per_worker=total_cpus / args.num_rollout_workers,
-                num_gpus_per_worker=args.num_gpus / args.num_rollout_workers,
+            ).reporting(
+                keep_per_episode_custom_metrics=True,
             )
             .framework("torch")
             .fault_tolerance(

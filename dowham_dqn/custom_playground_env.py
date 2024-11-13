@@ -75,7 +75,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             5: 0,
             6: 0,
         }
-
         if self.enable_dowham_reward:
             print("Enabling DoWhaM intrinsic reward")
             self.dowham_reward = DoWhaMIntrinsicReward(eta, H, tau)
@@ -150,6 +149,11 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         return probabilities[0].tolist()  # Convert to list for easy handling
 
     def step(self, action):
+        # Convert action to integer if it's a NumPy array or tensor
+        if isinstance(action, np.ndarray) or isinstance(action, torch.Tensor):
+            action = int(action.item())
+            print(f"Action: {action}")
+
         self.action_count[action] += 1
         current_state = self.agent_pos
         current_obs = self.hash()

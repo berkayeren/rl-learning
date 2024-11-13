@@ -5,7 +5,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from gym import Space
+from ray.rllib.core.rl_module.torch import TorchRLModule
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils import override
 from torch import Tensor
 
 
@@ -16,21 +18,21 @@ def init(module, weight_init, bias_init, gain=1):
 
 
 class MinigridPolicyNet(TorchModelV2, nn.Module):
-    def __init__(self, obs_space: Space, action_space: Space, num_outputs: int, model_config: Dict, name: str):
+    def __init__(self, observation_space: Space, action_space: Space, num_outputs: int, model_config: Dict, name: str):
         """
         Initialize the CustomMinigridPolicyNet.
 
         Args:
-            obs_space (Space): The observation space of the environment.
+            observation_space (Space): The observation space of the environment.
             action_space (Space): The action space of the environment.
             num_outputs (int): The number of outputs the network should have.
             model_config (Dict): The configuration for the model.
             name (str): The name of the model.
         """
-        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        TorchModelV2.__init__(self, observation_space, action_space, num_outputs, model_config, name)
         nn.Module.__init__(self)
 
-        self.obs_shape = obs_space.shape
+        self.obs_shape = observation_space.shape
         self.num_actions = action_space.n
 
         # Convolutional layers
@@ -139,7 +141,7 @@ class MinigridPolicyNet(TorchModelV2, nn.Module):
                                  self.core.hidden_size) for _ in range(2))
 
 
-class NatureCNN(TorchModelV2, nn.Module):
+class NatureCNN(TorchRLModule):
     """
     CNN from DQN Nature paper:
         Mnih, Volodymyr, et al.
@@ -149,19 +151,21 @@ class NatureCNN(TorchModelV2, nn.Module):
     Adjusted to use the GPU if available by checking for CUDA.
     """
 
-    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
-        # Initialize parents
-        TorchModelV2.__init__(
-            self, obs_space, action_space, num_outputs, model_config, name
-        )
-        nn.Module.__init__(self)
+    def __init__(self, observation_space
+                 , action_space
+                 , inference_only
+                 , model_config
+                 , catalog_class
+                 ):
+        super().__init__(observation_space=observation_space, action_space=action_space, inference_only=inference_only,
+                         model_config=model_config, catalog_class=catalog_class)
 
         # Determine device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Get the input channels from observation space
         # Assuming observations are in [C, H, W] format
-        n_input_channels = obs_space.shape[0]
+        n_input_channels = observation_space.shape[0]
 
         # Define the CNN layers
         self.cnn = nn.Sequential(
@@ -176,7 +180,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         # Compute the output size after the CNN layers
         with torch.no_grad():
             sample_input = torch.zeros(
-                1, n_input_channels, obs_space.shape[1], obs_space.shape[2]
+                1, n_input_channels, observation_space.shape[1], observation_space.shape[2]
             ).to(self.device)
             cnn_output = self.cnn(sample_input)
             n_flatten = cnn_output.view(1, -1).shape[1]
@@ -185,7 +189,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(n_flatten, 512),
             nn.ReLU(),
-            nn.Linear(512, num_outputs),
+            nn.Linear(512, action_space.n),
         ).to(self.device)
 
         # Value function head for the critic
@@ -198,13 +202,18 @@ class NatureCNN(TorchModelV2, nn.Module):
         # Ensure that the entire model is on the device
         self.to(self.device)
 
-    def forward(self, input_dict, state, seq_lens):
-        # Get observations and move to device
-        obs = input_dict["obs"].float().to(self.device)
-        # If observations are in [B, H, W, C], permute to [B, C, H, W]
-        if obs.shape[1:] != self.obs_space.shape:
+    @override(TorchRLModule)
+    def _forward(self, inputs, *args, **kwargs):
+        # Extract observations from the inputs dictionary
+        obs = inputs["obs"].float().to(self.device)
+
+        # Ensure the input is in the correct shape [batch_size, channels, height, width]
+        # If observations are in [batch_size, height, width, channels], we need to permute the dimensions
+        if obs.dim() == 4 and obs.shape[1] != self.cnn[0].in_channels:
+            # Assuming obs shape is [batch_size, height, width, channels], permute to [batch_size, channels, height, width]
             obs = obs.permute(0, 3, 1, 2)
-        # Pass through CNN
+
+        # Pass through CNN layers
         x = self.cnn(obs)
         x = x.view(x.size(0), -1)  # Flatten
 
@@ -213,7 +222,11 @@ class NatureCNN(TorchModelV2, nn.Module):
 
         # Pass through fully connected layers
         logits = self.fc(x.to(self.device))
-        return logits, state
+
+        # Pass through value head to get state value
+        value = self.value_head(x).squeeze(-1)  # Remove last dimension
+
+        return {"action_dist_inputs": logits, "state_value": value}
 
     def value_function(self):
         return self.value_head(self._features).squeeze(1)
