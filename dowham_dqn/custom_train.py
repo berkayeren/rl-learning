@@ -24,9 +24,6 @@ from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 os.environ["RAY_DEDUP_LOGS"] = "0"
 
-# Initialize Ray
-ray.init(ignore_reinit_error=True)
-
 # Register the custom model
 ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
 
@@ -177,7 +174,14 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                     "centered": False
                 },
                 model={
-                    "custom_model": "MinigridPolicyNet",
+                    "conv_filters": [
+                        [32, [3, 3], 2],  # 1st layer: 32 filters, 3x3 kernel, stride 2
+                        [64, [3, 3], 2],  # 2nd layer: 64 filters, 3x3 kernel, stride 2
+                        [128, [3, 3], 2],  # 3rd layer: 128 filters, 3x3 kernel, stride 2
+                        [256, [1, 1], 1],  # 4th layer: 256 filters, 1x1 kernel, stride 1
+                    ],
+                    "fcnet_hiddens": [512],  # Fully connected layer after conv layers
+                    "fcnet_activation": "relu",
                 },
                 gamma=0.99,  # Discount factor
                 train_batch_size=args.batch_size,  # Batch size
@@ -214,7 +218,14 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
             .training(
                 lr=1e-5,  # Learning rate
                 model={
-                    "custom_model": "MinigridPolicyNet",
+                    "conv_filters": [
+                        [32, [3, 3], 2],  # 1st layer: 32 filters, 3x3 kernel, stride 2
+                        [64, [3, 3], 2],  # 2nd layer: 64 filters, 3x3 kernel, stride 2
+                        [128, [3, 3], 2],  # 3rd layer: 128 filters, 3x3 kernel, stride 2
+                        [256, [1, 1], 1],  # 4th layer: 256 filters, 1x1 kernel, stride 1
+                    ],
+                    "fcnet_hiddens": [512],  # Fully connected layer after conv layers
+                    "fcnet_activation": "relu",
                 },
                 gamma=0.99,  # Discount factor
                 train_batch_size=args.batch_size,  # Batch size
@@ -255,6 +266,9 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
 
 
 if __name__ == "__main__":
+    # Initialize Ray
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus)
+
     # Get current date and time
     now = datetime.datetime.now()
     formatted_time = now.strftime("%Y-%m-%d_%H-%M")
@@ -315,7 +329,7 @@ if __name__ == "__main__":
         if i % args.checkpoint_size == 0:
             # Save the model checkpoint
             checkpoint_dir = os.path.join(output_folder_path, "checkpoint")
-            checkpoint_path = trainer.save(checkpoint_dir)
+            checkpoint_path = trainer.save(f'{checkpoint_dir}/checkpoint-{i}')
             print(f"Checkpoint saved at iteration {i} to {checkpoint_path}")
 
     # Shutdown Ray

@@ -1,3 +1,4 @@
+import collections
 import random
 from collections import defaultdict
 
@@ -6,6 +7,8 @@ from gymnasium.envs.registration import EnvSpec
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Door, Key
 from minigrid.envs import MultiRoomEnv
+from gymnasium.spaces import Box, Dict, Discrete
+from minigrid.core.mission import MissionSpace
 
 
 def hash_dict(d):
@@ -50,7 +53,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         return super().__str__()
 
-    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None,
+    def __init__(self, intrinsic_reward_scaling=0.85, eta=40, H=1, tau=0.5, size=7, render_mode=None,
                  prediction_net=None,
                  prediction_criterion=None,
                  prediction_optimizer=None,
@@ -99,7 +102,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
     def _gen_mission():
         return "traverse the rooms to get to the goal"
 
-    def _gen_grid(self, width, height):
+    def __gen_grid(self, width, height):
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
         # Place a vertical wall to divide the grid into two halves
@@ -168,15 +171,14 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         next_obs = hash_dict(self.gen_obs())
 
         if self.enable_dowham_reward:
-            self.dowham_reward.update_state_visits(current_obs, next_obs)
-            state_changed = current_state[0] != next_state[0] or current_state[1] != next_state[1]
-            self.dowham_reward.update_usage(current_obs, action)
-            self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
-            intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs,
+            self.dowham_reward.update_state_visits(current_state, next_state)
+            state_changed = current_state[0] != next_state[0]
+            self.dowham_reward.update_usage(current_state, action)
+            self.dowham_reward.update_effectiveness(current_state, action, next_state, state_changed)
+            intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_state, action, next_state,
                                                                              state_changed)
             self.intrinsic_reward = self.intrinsic_reward_scaling * intrinsic_reward
             reward += self.intrinsic_reward
-
         if self.enable_count_based:
             bonus = self.count_exploration.update(current_obs, action, reward, next_obs)
             self.count_bonus = bonus
@@ -329,7 +331,7 @@ class DoWhaMIntrinsicReward:
 
     def update_state_visits(self, current_obs, next_obs):
         if current_obs not in self.state_visit_counts:
-            self.state_visit_counts[current_obs] = 0
+            self.state_visit_counts[current_obs] = 1
 
         if next_obs not in self.state_visit_counts:
             self.state_visit_counts[next_obs] = 0
@@ -339,17 +341,16 @@ class DoWhaMIntrinsicReward:
     def calculate_intrinsic_reward(self, obs, action, next_obs, position_changed):
         reward = 0.0
 
-        is_valid_action = False
-        if action not in [0, 1, 2] and obs == next_obs:
-            is_valid_action = True
-
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
-        if position_changed or is_valid_action:
-            state_count = self.state_visit_counts[next_obs] ** self.tau
-            action_bonus = self.calculate_bonus(obs, action)
+        state_count = self.state_visit_counts[next_obs] ** self.tau
+        action_bonus = self.calculate_bonus(obs, action)
+
+        if position_changed:
             intrinsic_reward = action_bonus / np.sqrt(state_count)
             return intrinsic_reward + reward
-        return 0.0
+        else:
+            intrinsic_reward = action_bonus / np.sqrt(state_count)
+            return -abs(intrinsic_reward)
 
     def reset_episode(self):
         self.usage_counts.clear()

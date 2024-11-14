@@ -1,5 +1,9 @@
 import json
 import os
+from datetime import datetime
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
 
 if __name__ == "__main__":
     # Directory path
@@ -12,7 +16,7 @@ if __name__ == "__main__":
     # Function to extract the date from directory name
     def get_date_from_directory_name(directory_name):
         try:
-            date_str = directory_name.split('_')[2]
+            date_str = directory_name.split('_')[1]
             return datetime.strptime(date_str, '%Y-%m-%d')
         except (IndexError, ValueError):
             return None
@@ -86,6 +90,7 @@ if __name__ == "__main__":
             result_data = process_large_json(result_file_path)
             for data in result_data:
                 new_data = {}
+                new_data['episode_len_mean'] = data['episode_len_mean']
                 if 'percentage_visited_mean' in data['custom_metrics']:
                     new_data['percentage_visited_mean'] = data['custom_metrics']['percentage_visited_mean']
                     new_data['episode_reward_mean'] = data['episode_reward_mean']
@@ -103,10 +108,11 @@ if __name__ == "__main__":
     show_metrics(intrinsic_reward_results, 'intrinsic_reward_mean', kind='quadratic', window_size=101)
     show_metrics(intrinsic_reward_results, 'percentage_visited_mean', kind='quadratic', window_size=101)
     show_metrics(intrinsic_reward_results, 'episode_reward_mean', kind='quadratic', window_size=101)
+    show_metrics(intrinsic_reward_results, 'episode_len_mean', kind='quadratic', window_size=101)
 
-    show_metrics(count_based_results, 'intrinsic_reward_mean', kind='quadratic', window_size=101, color='orange')
-    show_metrics(count_based_results, 'percentage_visited_mean', kind='quadratic', window_size=101, color='orange')
-    show_metrics(count_based_results, 'episode_reward_mean', kind='quadratic', window_size=101, color='orange')
+    # show_metrics(count_based_results, 'intrinsic_reward_mean', kind='quadratic', window_size=101, color='orange')
+    # show_metrics(count_based_results, 'percentage_visited_mean', kind='quadratic', window_size=101, color='orange')
+    # show_metrics(count_based_results, 'episode_reward_mean', kind='quadratic', window_size=101, color='orange')
 
     import matplotlib.pyplot as plt
     import numpy as np
