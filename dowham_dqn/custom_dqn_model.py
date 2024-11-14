@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from gym import Space
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils.annotations import override
 from torch import Tensor
 
 
@@ -198,6 +199,7 @@ class NatureCNN(TorchModelV2, nn.Module):
         # Ensure that the entire model is on the device
         self.to(self.device)
 
+    @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
         # Get observations and move to device
         obs = input_dict["obs"].float().to(self.device)
@@ -213,6 +215,10 @@ class NatureCNN(TorchModelV2, nn.Module):
 
         # Pass through fully connected layers
         logits = self.fc(x.to(self.device))
+
+        # Pass through value head to get state value
+        # value = self.value_head(x).squeeze(-1)  # Remove last dimension
+
         return logits, state
 
     def value_function(self):

@@ -56,12 +56,14 @@ class CustomPlaygroundEnv(MultiRoomEnv):
                  prediction_optimizer=None,
                  enable_prediction_reward=False,
                  **kwargs):
+
         self.enable_prediction_reward = enable_prediction_reward
-        self.prediction_prob = 0.0
-        self.prediction_reward = 0.0
-        self.prediction_net = prediction_net
-        self.prediction_criterion = prediction_criterion
-        self.prediction_optimizer = prediction_optimizer
+        if enable_prediction_reward:
+            self.prediction_prob = 0.0
+            self.prediction_reward = 0.0
+            self.prediction_net = prediction_net
+            self.prediction_criterion = prediction_criterion
+            self.prediction_optimizer = prediction_optimizer
 
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.enable_dowham_reward = kwargs.pop('enable_dowham_reward', None)
@@ -151,17 +153,23 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
     def step(self, action):
         self.action_count[action] += 1
-        current_state = self.agent_pos
-        current_obs = self.hash()
-        initial_observation = self.gen_obs()
+        current_state = self.agent_pos, self.agent_dir
+        current_obs = hash_dict(self.gen_obs())
+
+        if self.enable_prediction_reward:
+            initial_observation = self.gen_obs()
+
         obs, reward, done, info, _ = super().step(action)
-        next_observation = self.gen_obs()
-        next_state = self.agent_pos
-        next_obs = self.hash()
+
+        if self.enable_prediction_reward:
+            next_observation = self.gen_obs()
+
+        next_state = self.agent_pos, self.agent_dir
+        next_obs = hash_dict(self.gen_obs())
 
         if self.enable_dowham_reward:
             self.dowham_reward.update_state_visits(current_obs, next_obs)
-            state_changed = current_state != next_state
+            state_changed = current_state[0] != next_state[0] or current_state[1] != next_state[1]
             self.dowham_reward.update_usage(current_obs, action)
             self.dowham_reward.update_effectiveness(current_obs, action, next_obs, state_changed)
             intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_obs, action, next_obs,
@@ -294,14 +302,23 @@ class DoWhaMIntrinsicReward:
             self.effectiveness_counts[obs] = {}
 
         if action not in self.effectiveness_counts[obs]:
-            self.effectiveness_counts[obs][action] = 0
+            self.effectiveness_counts[obs][action] = 1
+            return  # First time action is taken in this state
 
-        if state_changed or obs != next_obs:
+        if state_changed and self.is_novel_state(next_obs):
             self.effectiveness_counts[obs][action] += 1
 
+    def is_novel_state(self, next_obs):
+        if next_obs not in self.state_visit_counts:
+            self.state_visit_counts[next_obs] = 1
+            return True
+        else:
+            self.state_visit_counts[next_obs] += 1
+            return False
+
     def calculate_bonus(self, obs, action):
-        if obs not in self.usage_counts or obs not in self.effectiveness_counts:
-            return 0
+        # if obs not in self.usage_counts or obs not in self.effectiveness_counts:
+        #     return 0
 
         U = self.usage_counts[obs].get(action, 1)
         E = self.effectiveness_counts[obs].get(action, 0)
