@@ -1,4 +1,5 @@
 import collections
+import hashlib
 import random
 from collections import defaultdict
 
@@ -93,9 +94,8 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         self.episode_history = []
 
-        super().__init__(minNumRooms=4, maxNumRooms=4, max_steps=200, render_mode=render_mode)
+        super().__init__(minNumRooms=4, maxNumRooms=6, max_steps=200, agent_view_size=size, render_mode=render_mode)
 
-        # self.carrying = Key('yellow')
         self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
 
     @staticmethod
@@ -154,10 +154,35 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         return probabilities[0].tolist()  # Convert to list for easy handling
 
+    def observations_changed(self, current_obs, next_obs):
+        # Compare images
+        images_equal = np.array_equal(current_obs['image'], next_obs['image'])
+        # Compare directions
+        directions_equal = current_obs['direction'] == next_obs['direction']
+        # You can include mission if it changes over time
+        # For MiniGrid, the mission usually remains the same
+        return not (images_equal and directions_equal)
+
+    def hash(self, size=32):
+        """Compute a hash that uniquely identifies the current state of the environment.
+        :param size: Size of the hashing
+        """
+        sample_hash = hashlib.sha256()
+        grid, vis_mask = self.gen_obs_grid(agent_view_size=self.size)
+
+        # Encode the partially observable view into a numpy array
+        image = grid.encode(vis_mask)
+
+        to_encode = [image.tolist(), self.agent_pos, self.agent_dir]
+        for item in to_encode:
+            sample_hash.update(str(item).encode("utf8"))
+
+        return sample_hash.hexdigest()[:size]
+
     def step(self, action):
         self.action_count[action] += 1
-        current_state = self.agent_pos, self.agent_dir
-        current_obs = hash_dict(self.gen_obs())
+        current_state = self.hash()
+        current_obs = self.gen_obs()
 
         if self.enable_prediction_reward:
             initial_observation = self.gen_obs()
@@ -167,12 +192,12 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         if self.enable_prediction_reward:
             next_observation = self.gen_obs()
 
-        next_state = self.agent_pos, self.agent_dir
-        next_obs = hash_dict(self.gen_obs())
+        next_state = self.hash()
+        next_obs = self.gen_obs()
 
         if self.enable_dowham_reward:
             self.dowham_reward.update_state_visits(current_state, next_state)
-            state_changed = current_state[0] != next_state[0]
+            state_changed = self.observations_changed(current_obs, next_obs)
             self.dowham_reward.update_usage(current_state, action)
             self.dowham_reward.update_effectiveness(current_state, action, next_state, state_changed)
             intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_state, action, next_state,
@@ -201,6 +226,9 @@ class CustomPlaygroundEnv(MultiRoomEnv):
                  "prob": self.prediction_prob})
             # Add the prediction-based reward to the total reward
             reward += self.prediction_reward
+
+        if done:
+            reward += 10
 
         return obs, reward, done, info, {}
 
@@ -293,6 +321,7 @@ class DoWhaMIntrinsicReward:
         self.usage_counts = {}
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
+        self.recent_transitions = collections.deque(maxlen=16)  # Track recent state transitions
 
     def update_usage(self, obs, action):
         if obs not in self.usage_counts:
@@ -307,21 +336,14 @@ class DoWhaMIntrinsicReward:
             self.effectiveness_counts[obs][action] = 1
             return  # First time action is taken in this state
 
-        if state_changed and self.is_novel_state(next_obs):
+        transition = (obs, action, next_obs)
+
+        is_novel_state = transition not in self.recent_transitions
+
+        if state_changed and is_novel_state:
             self.effectiveness_counts[obs][action] += 1
 
-    def is_novel_state(self, next_obs):
-        if next_obs not in self.state_visit_counts:
-            self.state_visit_counts[next_obs] = 1
-            return True
-        else:
-            self.state_visit_counts[next_obs] += 1
-            return False
-
     def calculate_bonus(self, obs, action):
-        # if obs not in self.usage_counts or obs not in self.effectiveness_counts:
-        #     return 0
-
         U = self.usage_counts[obs].get(action, 1)
         E = self.effectiveness_counts[obs].get(action, 0)
         term = (E ** self.H) / (U ** self.H)
@@ -340,19 +362,26 @@ class DoWhaMIntrinsicReward:
 
     def calculate_intrinsic_reward(self, obs, action, next_obs, position_changed):
         reward = 0.0
+        # Penalize recently repeated transitions
+        transition = (obs, action, next_obs)
+
+        is_reward_available = position_changed and transition not in self.recent_transitions
 
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
         state_count = self.state_visit_counts[next_obs] ** self.tau
         action_bonus = self.calculate_bonus(obs, action)
 
-        if position_changed:
+        if is_reward_available:
+            self.recent_transitions.append(transition)  # Track the new transition
             intrinsic_reward = action_bonus / np.sqrt(state_count)
             return intrinsic_reward + reward
         else:
-            intrinsic_reward = action_bonus / np.sqrt(state_count)
+            decay_factor = np.exp(-0.1 * state_count)  # Adjust decay factor as needed
+            intrinsic_reward = action_bonus * decay_factor / np.sqrt(state_count)
             return -abs(intrinsic_reward)
 
     def reset_episode(self):
         self.usage_counts.clear()
         self.effectiveness_counts.clear()
         self.state_visit_counts.clear()
+        self.recent_transitions.clear()

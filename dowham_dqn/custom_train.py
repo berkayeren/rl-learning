@@ -9,12 +9,16 @@ import ray
 import torch
 import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
+from ray import train, tune
+from ray.air import RunConfig, ScalingConfig
 from ray.experimental.tqdm_ray import tqdm
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
-from ray.tune import register_env
+from ray.tune import register_env, TuneConfig
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune.tune_config import TuneConfig
 from torch import optim
 
 from custom_dqn_model import NatureCNN
@@ -216,7 +220,6 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
             )
             .callbacks(AccuracyCallback)
             .training(
-                lr=1e-5,  # Learning rate
                 model={
                     "conv_filters": [
                         [32, [3, 3], 2],  # 1st layer: 32 filters, 3x3 kernel, stride 2
@@ -224,18 +227,33 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                         [128, [3, 3], 2],  # 3rd layer: 128 filters, 3x3 kernel, stride 2
                         [256, [1, 1], 1],  # 4th layer: 256 filters, 1x1 kernel, stride 1
                     ],
-                    "fcnet_hiddens": [512],  # Fully connected layer after conv layers
-                    "fcnet_activation": "relu",
+                    "conv_activation": "relu",  # Activation function
+                    "fcnet_hiddens": [512],  # Fully connected layers with 512 units
+                    "fcnet_activation": "relu",  # Activation function for fully connected layers
+                    "vf_share_layers": True,  # share layers between actor and critic
+                    "use_lstm": True,  # Enable LSTM
+                    "lstm_cell_size": 256,  # Size of the LSTM cell
+                    "max_seq_len": 16,  # Maximum sequence length
+                    # Optional: Include previous actions and rewards in the LSTM input
+                    "lstm_use_prev_reward": True,
+                    "lstm_use_prev_action": True,
                 },
                 gamma=0.99,  # Discount factor
-                train_batch_size=args.batch_size,  # Batch size
-                sgd_minibatch_size=args.batch_size // 2,  # Batch size
-                num_sgd_iter=10,
-                use_gae=True,
-                lambda_=0.95,
-                clip_param=0.2,
-                vf_clip_param=10.0,
-                entropy_coeff=0.01,
+                lr=0.0002041573878781647,  # Learning rate from the best config
+                train_batch_size=32,  # Batch size
+                sgd_minibatch_size=16,  # Size of SGD minibatches
+                num_sgd_iter=10,  # Number of SGD iterations per epoch
+                clip_param=0.2,  # PPO clip parameter
+                vf_clip_param=10.0,  # Clip parameter for value function
+                vf_loss_coeff=1.0,  # Value function loss coefficient
+                entropy_coeff=0.05,  # Entropy regularization coefficient
+            )
+            .evaluation(
+                evaluation_interval=None,  # Disable periodic evaluation
+                evaluation_duration=10,  # Number of episodes for evaluation
+                evaluation_duration_unit="episodes",  # Measure evaluation in episodes
+                evaluation_parallel_to_training=False,  # Evaluation runs sequentially
+                evaluation_config=None,  # Use the main training configuration for evaluation
             )
             .resources(
                 num_gpus=args.num_gpus,
