@@ -2,11 +2,13 @@ import collections
 import hashlib
 import random
 from collections import defaultdict
+from time import sleep
 
 import numpy as np
 from gymnasium.envs.registration import EnvSpec
+from minigrid.core.constants import OBJECT_TO_IDX
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Goal, Door, Key
+from minigrid.core.world_object import Goal, Door, Key, WorldObj
 from minigrid.envs import MultiRoomEnv
 from gymnasium.spaces import Box, Dict, Discrete
 from minigrid.core.mission import MissionSpace
@@ -54,21 +56,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         return super().__str__()
 
-    def __init__(self, intrinsic_reward_scaling=0.85, eta=40, H=1, tau=0.5, size=7, render_mode=None,
-                 prediction_net=None,
-                 prediction_criterion=None,
-                 prediction_optimizer=None,
-                 enable_prediction_reward=False,
-                 **kwargs):
-
-        self.enable_prediction_reward = enable_prediction_reward
-        if enable_prediction_reward:
-            self.prediction_prob = 0.0
-            self.prediction_reward = 0.0
-            self.prediction_net = prediction_net
-            self.prediction_criterion = prediction_criterion
-            self.prediction_optimizer = prediction_optimizer
-
+    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None, **kwargs):
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.enable_dowham_reward = kwargs.pop('enable_dowham_reward', None)
         self.enable_count_based = kwargs.pop('enable_count_based', None)
@@ -94,7 +82,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         self.episode_history = []
 
-        super().__init__(minNumRooms=4, maxNumRooms=6, max_steps=200, agent_view_size=size, render_mode=render_mode)
+        super().__init__(minNumRooms=1, maxNumRooms=6, max_steps=200, agent_view_size=size, render_mode=render_mode)
 
         self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
 
@@ -120,39 +108,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         self.agent_dir = random.randint(0, 3)
         self.mission = "traverse the rooms to get to the goal"
-
-    def preprocess_observation(self, obs):
-        image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
-        direction = torch.tensor([[obs["direction"]]], dtype=torch.float32)
-        return image, direction
-
-    def predict_action_with_probability(self, observation):
-        image, direction = self.preprocess_observation(observation)
-
-        with torch.no_grad():
-            logits = self.prediction_net(image, direction)
-
-            # Apply softmax to convert logits to probabilities
-            probabilities = F.softmax(logits, dim=1)
-
-            # Get the predicted action (index of max probability)
-            predicted_action = torch.argmax(probabilities, dim=1).item()
-
-            # Get the probability of the predicted action
-            predicted_probability = probabilities[0, predicted_action].item()
-
-        return predicted_action, predicted_probability
-
-    def get_all_action_probabilities(self, observation):
-        image, direction = self.preprocess_observation(observation)
-        image = image.unsqueeze(0)
-        direction = direction.unsqueeze(0)
-
-        with torch.no_grad():
-            logits = self.prediction_net(image, direction)
-            probabilities = F.softmax(logits, dim=1)
-
-        return probabilities[0].tolist()  # Convert to list for easy handling
 
     def observations_changed(self, current_obs, next_obs):
         # Compare images
@@ -184,13 +139,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         current_state = self.hash()
         current_obs = self.gen_obs()
 
-        if self.enable_prediction_reward:
-            initial_observation = self.gen_obs()
-
         obs, reward, done, info, _ = super().step(action)
-
-        if self.enable_prediction_reward:
-            next_observation = self.gen_obs()
 
         next_state = self.hash()
         next_obs = self.gen_obs()
@@ -215,42 +164,10 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             'mission': np.array([ord(c) for c in self.mission[:1]], dtype=np.uint8)
         }
 
-        if self.enable_prediction_reward:
-            self.prediction_reward, predicted_action, self.prediction_prob = self.prediction_error(action,
-                                                                                                   initial_observation)
-
-            self.episode_history.append(
-                {"current_obs": initial_observation, "agent_dir": self.agent_dir, "action": action, "reward": reward,
-                 "next_obs": next_observation, "prediction_reward": self.prediction_reward,
-                 "predicted_action": predicted_action,
-                 "prob": self.prediction_prob})
-            # Add the prediction-based reward to the total reward
-            reward += self.prediction_reward
-
         if done:
             reward += 10
 
         return obs, reward, done, info, {}
-
-    def prediction_error(self, action, initial_observation):
-        predicted_action, prob = self.predict_action_with_probability(initial_observation)
-        # print(f"Action:{action}, Predicted action: {predicted_action}, with probability: {prob:.4f}")
-        # Prediction-based reward shaping
-        prediction_reward_scale = 0.3  # Adjust this value to control the impact of the prediction reward
-        if action == predicted_action:
-            prediction_reward = prediction_reward_scale * prob
-            # print(f"Action matches prediction. Bonus reward: {prediction_reward:.4f}")
-        else:
-            prediction_reward = -prediction_reward_scale * (1 - prob)
-            # print(f"Action doesn't match prediction. Penalty: {prediction_reward:.4f}")
-        # Exploration encouragement
-        exploration_threshold = 0.3  # Adjust this value based on your needs
-        exploration_bonus_scale = 0.05  # Adjust this value to control the impact of the exploration bonus
-        if prob < exploration_threshold and action != predicted_action:
-            exploration_bonus = exploration_bonus_scale * (1 - prob)
-            # print(f"Exploration bonus: {exploration_bonus:.4f}")
-            prediction_reward += exploration_bonus
-        return prediction_reward, predicted_action, prob
 
     def reset(self, **kwargs):
         self.episode_history = []
@@ -321,7 +238,7 @@ class DoWhaMIntrinsicReward:
         self.usage_counts = {}
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
-        self.recent_transitions = collections.deque(maxlen=16)  # Track recent state transitions
+        self.recent_transitions = collections.deque(maxlen=64)  # Track recent state transitions
 
     def update_usage(self, obs, action):
         if obs not in self.usage_counts:
@@ -346,8 +263,9 @@ class DoWhaMIntrinsicReward:
     def calculate_bonus(self, obs, action):
         U = self.usage_counts[obs].get(action, 1)
         E = self.effectiveness_counts[obs].get(action, 0)
-        term = (E ** self.H) / (U ** self.H)
-        exp_term = self.eta ** (1 - term)
+        ratio = E / U
+        term = ratio ** self.H
+        exp_term = self.eta ** term
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
@@ -371,14 +289,17 @@ class DoWhaMIntrinsicReward:
         state_count = self.state_visit_counts[next_obs] ** self.tau
         action_bonus = self.calculate_bonus(obs, action)
 
+        self.recent_transitions.append(transition)  # Track the new transition
+        reward = 0.0
         if is_reward_available:
-            self.recent_transitions.append(transition)  # Track the new transition
             intrinsic_reward = action_bonus / np.sqrt(state_count)
-            return intrinsic_reward + reward
+            reward = intrinsic_reward + reward
         else:
             decay_factor = np.exp(-0.1 * state_count)  # Adjust decay factor as needed
             intrinsic_reward = action_bonus * decay_factor / np.sqrt(state_count)
-            return -abs(intrinsic_reward)
+            reward = min(-abs(intrinsic_reward), -1e-2)
+
+        return reward
 
     def reset_episode(self):
         self.usage_counts.clear()

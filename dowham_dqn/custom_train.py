@@ -9,16 +9,12 @@ import ray
 import torch
 import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
-from ray import train, tune
-from ray.air import RunConfig, ScalingConfig
 from ray.experimental.tqdm_ray import tqdm
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
-from ray.tune import register_env, TuneConfig
-from ray.tune.schedulers import ASHAScheduler
-from ray.tune.tune_config import TuneConfig
+from ray.tune import register_env
 from torch import optim
 
 from custom_dqn_model import NatureCNN
@@ -42,8 +38,7 @@ parser.add_argument('--start', type=int, help='Start Index', default=0)
 parser.add_argument('--end', type=int, help='End Index', default=50000)
 parser.add_argument('--restore', action='store_true', help='Restore from checkpoint')
 parser.add_argument('--checkpoint_path', type=str, help='Checkpoint Path', default='')
-parser.add_argument('--enable_prediction_reward', action='store_true', help='Enable prediction reward')
-parser.add_argument('--enable_dowham_reward', action='store_true', help='Enable prediction reward')
+parser.add_argument('--enable_dowham_reward', action='store_true', help='Enable DoWham Intrinsic reward')
 parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
 parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
 parser.add_argument('--checkpoint_size', type=int, help='Iteration Number to take checkpoint', default=100000)
@@ -118,23 +113,6 @@ class AccuracyCallback(DefaultCallbacks):
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
-        if env.enable_prediction_reward:
-            for eh in env.episode_history:
-                current_obs = eh["current_obs"]
-                action = eh["action"]
-                image, direction = self.preprocess_observation(current_obs)
-                env.prediction_optimizer.zero_grad()
-                outputs = env.prediction_net(image, direction)
-                loss = env.prediction_criterion(outputs, torch.tensor([action], dtype=torch.long))
-                loss.backward()
-                env.prediction_optimizer.step()
-            # Save the prediction network
-            torch.save({
-                'model_state_dict': env.prediction_net.state_dict(),
-                'optimizer_state_dict': env.prediction_optimizer.state_dict(),
-            },
-                f'{os.path.join(self.path, "prediction_network")}/prediction_network_checkpoint.pth')
-
         total_size = self.width * self.height
         unique_states_visited = np.count_nonzero(self.states)
         percentage_visited = (unique_states_visited / total_size) * 100
@@ -218,7 +196,7 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker
             )
-            .callbacks(AccuracyCallback)
+            # .callbacks(AccuracyCallback)
             .training(
                 model={
                     "conv_filters": [
@@ -239,26 +217,18 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                     "lstm_use_prev_action": True,
                 },
                 gamma=0.99,  # Discount factor
-                lr=0.0002041573878781647,  # Learning rate from the best config
+                lr=0.00025,  # Learning rate from the best config
                 train_batch_size=32,  # Batch size
                 sgd_minibatch_size=16,  # Size of SGD minibatches
                 num_sgd_iter=10,  # Number of SGD iterations per epoch
                 clip_param=0.2,  # PPO clip parameter
-                vf_clip_param=10.0,  # Clip parameter for value function
-                vf_loss_coeff=1.0,  # Value function loss coefficient
                 entropy_coeff=0.05,  # Entropy regularization coefficient
-            )
-            .evaluation(
-                evaluation_interval=None,  # Disable periodic evaluation
-                evaluation_duration=10,  # Number of episodes for evaluation
-                evaluation_duration_unit="episodes",  # Measure evaluation in episodes
-                evaluation_parallel_to_training=False,  # Evaluation runs sequentially
-                evaluation_config=None,  # Use the main training configuration for evaluation
+                use_gae=True,  # Use Generalized Advantage Estimation
             )
             .resources(
                 num_gpus=args.num_gpus,
-                num_cpus_per_worker=total_cpus / args.num_rollout_workers,
-                num_gpus_per_worker=args.num_gpus / args.num_rollout_workers,
+                # num_cpus_per_worker=total_cpus / args.num_rollout_workers,
+                # num_gpus_per_worker=args.num_gpus / args.num_rollout_workers,
             )
             .framework("torch")
             .fault_tolerance(
@@ -293,7 +263,6 @@ if __name__ == "__main__":
 
     # Create output directories
     os.makedirs(output_folder_path, exist_ok=True)
-    os.makedirs(os.path.join(output_folder_path, "prediction_network"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "results"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "checkpoint"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "results", f"result_{formatted_time}"), exist_ok=True)
@@ -307,10 +276,6 @@ if __name__ == "__main__":
     register_env("MiniGrid-CustomPlayground-v0",
                  lambda config: ImgObsWrapper(CustomPlaygroundEnv(
                      render_mode=args.render_mode,
-                     prediction_net=net,
-                     prediction_criterion=criterion,
-                     prediction_optimizer=optimizer,
-                     enable_prediction_reward=args.enable_prediction_reward,
                      enable_dowham_reward=args.enable_dowham_reward,
                  )))
 
