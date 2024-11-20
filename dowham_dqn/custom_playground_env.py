@@ -2,6 +2,7 @@ import collections
 import hashlib
 import random
 from collections import defaultdict
+from math import exp
 from time import sleep
 
 import numpy as np
@@ -57,6 +58,8 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         return super().__str__()
 
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None, **kwargs):
+        self.success_rate: float = 0.0
+        self.done = False
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
         self.enable_dowham_reward = kwargs.pop('enable_dowham_reward', None)
         self.enable_count_based = kwargs.pop('enable_count_based', None)
@@ -82,9 +85,21 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         self.episode_history = []
 
-        super().__init__(minNumRooms=1, maxNumRooms=6, max_steps=200, agent_view_size=size, render_mode=render_mode)
+        self.minNumRooms = kwargs.pop('minNumRooms', 1)
+        self.maxNumRooms = kwargs.pop('maxNumRooms', 1)
+        self.maxRoomSize = kwargs.pop('maxRoomSize', 10)
+        self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
+
+        super().__init__(
+            minNumRooms=self.minNumRooms,
+            maxNumRooms=self.maxNumRooms,
+            maxRoomSize=self.maxRoomSize,
+            max_steps=200, agent_view_size=size, render_mode=render_mode,
+            **kwargs
+        )
 
         self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
+        self.success_history = collections.deque(maxlen=1024)
 
     @staticmethod
     def _gen_mission():
@@ -164,8 +179,10 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             'mission': np.array([ord(c) for c in self.mission[:1]], dtype=np.uint8)
         }
 
+        self.done = done
+
         if done:
-            reward += 10
+            reward += max(10, 100 / np.sqrt(sum(self.action_count.values())))
 
         return obs, reward, done, info, {}
 
@@ -186,8 +203,24 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             5: 0,
             6: 0,
         }
+        self.success_history.append(self.done)
+        self.success_rate = sum(self.success_history) / len(self.success_history)
+
+        # Check if the success rate exceeds the threshold and we can increase difficulty
+        if len(self.success_history) >= min(1024, 2 ** (self.minNumRooms + 7)) \
+                and self.success_rate >= 0.8 \
+                and self.minNumRooms < self.max_possible_rooms:
+            self.minNumRooms += 1
+            self.maxNumRooms += 1
+            print(f"Increasing number of rooms to {self.minNumRooms}")
+            self.success_history.clear()
+            self.maxRoomSize = 10
+
+        if self.done:
+            self.maxRoomSize = min(20, self.maxRoomSize + 1)
 
         obs = super().reset(**kwargs)
+        self.done = False
         obs = {
             'image': obs[0]['image'],
             'direction': np.array(self.agent_dir, dtype=np.int64),

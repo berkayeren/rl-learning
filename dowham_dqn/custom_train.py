@@ -2,6 +2,7 @@ import argparse
 import datetime
 import os
 import sys
+from collections import deque
 from typing import Optional, Union, Dict
 
 import numpy as np
@@ -12,6 +13,7 @@ from minigrid.wrappers import ImgObsWrapper
 from ray.experimental.tqdm_ray import tqdm
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
@@ -84,8 +86,6 @@ class AccuracyCallback(DefaultCallbacks):
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
-        x, y = env.agent_pos
-        self.states[x][y] += 1
 
         if hasattr(env, "intrinsic_reward"):
             episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
@@ -93,30 +93,17 @@ class AccuracyCallback(DefaultCallbacks):
         if hasattr(env, "count_bonus"):
             episode.custom_metrics["count_bonus"] = env.count_bonus
 
-        if hasattr(env, "enable_prediction_reward") and env.enable_prediction_reward:
-            episode.custom_metrics["prediction_reward"] = env.prediction_reward
-            episode.custom_metrics["prediction_prob"] = env.prediction_prob
-
-    def preprocess_observation(self, obs):
-        image = torch.tensor(obs["image"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
-        direction = torch.tensor([[obs["direction"]]], dtype=torch.float32)
-        return image, direction
-
     def on_episode_end(
             self,
             *,
             worker: "RolloutWorker",
             base_env: BaseEnv,
             policies: Dict[PolicyID, Policy],
-            episode: Union["Episode", "EpisodeV2"],
+            episode: EpisodeV2,
             env_index: Optional[int] = None,
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
-        total_size = self.width * self.height
-        unique_states_visited = np.count_nonzero(self.states)
-        percentage_visited = (unique_states_visited / total_size) * 100
-        episode.custom_metrics["percentage_visited"] = percentage_visited
         episode.custom_metrics["left"] = env.action_count[0]
         episode.custom_metrics["right"] = env.action_count[1]
         episode.custom_metrics["forward"] = env.action_count[2]
@@ -124,6 +111,11 @@ class AccuracyCallback(DefaultCallbacks):
         episode.custom_metrics["drop"] = env.action_count[4]
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
+        episode.custom_metrics["success_rate"] = env.success_rate
+        episode.custom_metrics["min_num_rooms"] = env.minNumRooms
+        episode.custom_metrics["max_room_size"] = env.maxRoomSize
+        # print(
+        #     f"Reward:{episode.total_reward} | env.success_rate:{env.success_rate} | Len:{len(env.success_history)} | env.minNumRooms:{env.minNumRooms}")
 
 
 def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, output_folder_path, formatted_time):
@@ -196,7 +188,7 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker
             )
-            # .callbacks(AccuracyCallback)
+            .callbacks(AccuracyCallback)
             .training(
                 model={
                     "conv_filters": [
