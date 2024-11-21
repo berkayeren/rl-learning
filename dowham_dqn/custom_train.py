@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
 from ray.experimental.tqdm_ray import tqdm
-from ray.rllib import BaseEnv, Policy
+from ray.rllib import BaseEnv, Policy, SampleBatch
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
@@ -117,6 +117,13 @@ class AccuracyCallback(DefaultCallbacks):
         # print(
         #     f"Reward:{episode.total_reward} | env.success_rate:{env.success_rate} | Len:{len(env.success_history)} | env.minNumRooms:{env.minNumRooms}")
 
+    # def on_learn_on_batch(
+    #        self, *, policy: Policy, train_batch: SampleBatch, result: dict, **kwargs
+    # ) -> None:
+    #    seq_lens = train_batch.get("seq_lens", 16)
+    #    train_batch['seq_lens'] = np.full_like(seq_lens, 16)
+    #    super().on_learn_on_batch(policy=policy, train_batch=train_batch, result=result, **kwargs)
+
 
 def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, output_folder_path, formatted_time):
     if algo_name.lower() == 'dqn':
@@ -126,7 +133,8 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
             .environment(env="MiniGrid-CustomPlayground-v0")
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
-                num_envs_per_worker=args.num_envs_per_worker
+                num_envs_per_worker=args.num_envs_per_worker,
+                batch_mode="truncate_episodes",  # Necessary for RNNs
             )
             .exploration(
                 explore=True,
@@ -139,34 +147,36 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
             )
             .callbacks(AccuracyCallback)
             .training(
-                lr=1e-5,  # Learning rate
-                optimizer={
-                    "type": "RMSProp",
-                    "lr": 1e-5,
-                    "weight_decay": 0,
-                    "momentum": 0,
-                    "centered": False
-                },
+                lr=0.00025,
+                optimizer={"type": "Adam"},
                 model={
                     "conv_filters": [
-                        [32, [3, 3], 2],  # 1st layer: 32 filters, 3x3 kernel, stride 2
-                        [64, [3, 3], 2],  # 2nd layer: 64 filters, 3x3 kernel, stride 2
-                        [128, [3, 3], 2],  # 3rd layer: 128 filters, 3x3 kernel, stride 2
-                        [256, [1, 1], 1],  # 4th layer: 256 filters, 1x1 kernel, stride 1
+                        [32, [3, 3], 2],
+                        [64, [3, 3], 2],
+                        [128, [3, 3], 2],
+                        [256, [1, 1], 1],
                     ],
-                    "fcnet_hiddens": [512],  # Fully connected layer after conv layers
+                    "conv_activation": "relu",
+                    "fcnet_hiddens": [512],
                     "fcnet_activation": "relu",
+                    "use_lstm": False,
+                    "lstm_cell_size": 256,
+                    "max_seq_len": 16,
+                    "lstm_use_prev_reward": True,
+                    "lstm_use_prev_action": True,
                 },
-                gamma=0.99,  # Discount factor
-                train_batch_size=args.batch_size,  # Batch size
-                num_atoms=1,
-                v_min=-10.0,
-                v_max=10.0,
-                noisy=False,
-                dueling=True,  # Use dueling architecture
-                double_q=True,  # Use double Q-learning
-                n_step=3,  # N-step Q-learning
+                gamma=0.99,
+                train_batch_size=32,
+                dueling=True,
+                double_q=True,
+                n_step=3,
                 target_network_update_freq=500,
+                replay_buffer_config={
+                    "type": "ReplayBuffer",
+                    "capacity": 50000,  # Replay buffer capacity
+                    "replay_sequence_length": 16,  # Ensure sequence handling
+                    "seq_lens": 16,  # Ensure sequence handling
+                }
             )
             .resources(
                 num_gpus=args.num_gpus,

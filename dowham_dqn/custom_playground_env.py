@@ -216,9 +216,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
             self.success_history.clear()
             self.maxRoomSize = 10
 
-        if self.done:
-            self.maxRoomSize = min(20, self.maxRoomSize + 1)
-
         obs = super().reset(**kwargs)
         self.done = False
         obs = {
@@ -296,9 +293,8 @@ class DoWhaMIntrinsicReward:
     def calculate_bonus(self, obs, action):
         U = self.usage_counts[obs].get(action, 1)
         E = self.effectiveness_counts[obs].get(action, 0)
-        ratio = E / U
-        term = ratio ** self.H
-        exp_term = self.eta ** term
+        term = (E ** self.H) / (U ** self.H)
+        exp_term = self.eta ** (1 - term)
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
@@ -312,7 +308,6 @@ class DoWhaMIntrinsicReward:
         self.state_visit_counts[next_obs] += 1
 
     def calculate_intrinsic_reward(self, obs, action, next_obs, position_changed):
-        reward = 0.0
         # Penalize recently repeated transitions
         transition = (obs, action, next_obs)
 
@@ -331,7 +326,8 @@ class DoWhaMIntrinsicReward:
             decay_factor = np.exp(-0.1 * state_count)  # Adjust decay factor as needed
             intrinsic_reward = action_bonus * decay_factor / np.sqrt(state_count)
             reward = min(-abs(intrinsic_reward), -1e-2)
-
+        # print(
+        #     f"Transition: {transition}, Reward: {reward}, IsReward: {is_reward_available}, State Count: {state_count}, Action Bonus: {action_bonus}")
         return reward
 
     def reset_episode(self):
