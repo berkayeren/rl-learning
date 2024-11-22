@@ -2,17 +2,12 @@ import collections
 import hashlib
 import random
 from collections import defaultdict
-from math import exp
-from time import sleep
 
 import numpy as np
 from gymnasium.envs.registration import EnvSpec
-from minigrid.core.constants import OBJECT_TO_IDX
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Goal, Door, Key, WorldObj
+from minigrid.core.world_object import Goal, Door, Key
 from minigrid.envs import MultiRoomEnv
-from gymnasium.spaces import Box, Dict, Discrete
-from minigrid.core.mission import MissionSpace
 
 
 def hash_dict(d):
@@ -26,7 +21,6 @@ def hash_dict(d):
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class MiniGridNet(nn.Module):
@@ -58,6 +52,8 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         return super().__str__()
 
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None, **kwargs):
+        self.agent_pos = (1, 1)
+        self.agent_dir = 0
         self.success_rate: float = 0.0
         self.done = False
         self.intrinsic_reward_scaling = intrinsic_reward_scaling
@@ -91,9 +87,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
 
         super().__init__(
-            minNumRooms=self.minNumRooms,
-            maxNumRooms=self.maxNumRooms,
-            maxRoomSize=self.maxRoomSize,
             max_steps=200, agent_view_size=size, render_mode=render_mode,
             **kwargs
         )
@@ -105,7 +98,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
     def _gen_mission():
         return "traverse the rooms to get to the goal"
 
-    def __gen_grid(self, width, height):
+    def _gen_grid(self, width, height):
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
         # Place a vertical wall to divide the grid into two halves
@@ -205,16 +198,6 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         }
         self.success_history.append(self.done)
         self.success_rate = sum(self.success_history) / len(self.success_history)
-
-        # Check if the success rate exceeds the threshold and we can increase difficulty
-        if len(self.success_history) >= min(1024, 2 ** (self.minNumRooms + 7)) \
-                and self.success_rate >= 0.8 \
-                and self.minNumRooms < self.max_possible_rooms:
-            self.minNumRooms += 1
-            self.maxNumRooms += 1
-            print(f"Increasing number of rooms to {self.minNumRooms}")
-            self.success_history.clear()
-            self.maxRoomSize = 10
 
         obs = super().reset(**kwargs)
         self.done = False

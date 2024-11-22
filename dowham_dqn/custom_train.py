@@ -87,11 +87,8 @@ class AccuracyCallback(DefaultCallbacks):
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
 
-        if hasattr(env, "intrinsic_reward"):
-            episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
-
-        if hasattr(env, "count_bonus"):
-            episode.custom_metrics["count_bonus"] = env.count_bonus
+        episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
+        episode.custom_metrics["step_done"] = env.done
 
     def on_episode_end(
             self,
@@ -112,8 +109,7 @@ class AccuracyCallback(DefaultCallbacks):
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
         episode.custom_metrics["success_rate"] = env.success_rate
-        episode.custom_metrics["min_num_rooms"] = env.minNumRooms
-        episode.custom_metrics["max_room_size"] = env.maxRoomSize
+        episode.custom_metrics["success_history_len"] = len(env.success_history)
         # print(
         #     f"Reward:{episode.total_reward} | env.success_rate:{env.success_rate} | Len:{len(env.success_history)} | env.minNumRooms:{env.minNumRooms}")
 
