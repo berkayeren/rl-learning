@@ -2,25 +2,26 @@ import argparse
 import datetime
 import os
 import sys
-from collections import deque
 from typing import Optional, Union, Dict
 
+import gym
 import numpy as np
 import ray
-import torch
-import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
 from ray.experimental.tqdm_ray import tqdm
-from ray.rllib import BaseEnv, Policy, SampleBatch
+from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.rllib.core.rl_module import RLModule
+from ray.rllib.env.env_runner import EnvRunner
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
-from ray.rllib.utils.typing import PolicyID
+from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
+from ray.rllib.utils.replay_buffers import ReplayBuffer
+from ray.rllib.utils.typing import PolicyID, EpisodeType
 from ray.tune import register_env
-from torch import optim
 
 from custom_dqn_model import NatureCNN
-from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
+from custom_playground_env import CustomPlaygroundEnv
 
 # Suppress Deprecation Warnings and Ray duplicate logs
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
@@ -56,6 +57,7 @@ output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_fold
 class AccuracyCallback(DefaultCallbacks):
     def __init__(self, path=output_folder_path):
         super().__init__()
+        self.visited_states = set()
         self.states = None
         self.height = 0
         self.width = 0
@@ -64,25 +66,35 @@ class AccuracyCallback(DefaultCallbacks):
     def on_episode_start(
             self,
             *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            policies: Dict[PolicyID, Policy],
-            episode: Union["Episode", "EpisodeV2"],
-            env_index: Optional[int] = None,
+            episode: Union[EpisodeType, EpisodeV2],
+            env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
         self.visited_states = set()
-        self.height = base_env.get_sub_environments()[env_index].unwrapped.height
-        self.width = base_env.get_sub_environments()[env_index].unwrapped.width
-        self.states = np.full((self.width, self.height), 0)
+        if base_env is not None:
+            self.height = base_env.get_sub_environments()[env_index].unwrapped.height
+            self.width = base_env.get_sub_environments()[env_index].unwrapped.width
+            self.states = np.full((self.width, self.height), 0)
 
     def on_episode_step(
             self,
             *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            episode: "EpisodeV2",
-            env_index: Optional[int] = None,
+            episode: Union[EpisodeType, EpisodeV2],
+            env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
@@ -93,11 +105,15 @@ class AccuracyCallback(DefaultCallbacks):
     def on_episode_end(
             self,
             *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            policies: Dict[PolicyID, Policy],
-            episode: EpisodeV2,
-            env_index: Optional[int] = None,
+            episode: Union[EpisodeType, EpisodeV2],
+            env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
@@ -121,67 +137,55 @@ class AccuracyCallback(DefaultCallbacks):
     #    super().on_learn_on_batch(policy=policy, train_batch=train_batch, result=result, **kwargs)
 
 
-def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, output_folder_path, formatted_time):
+def get_trainer_config(algo_name, args, total_cpus, output_folder_path, formatted_time):
     if algo_name.lower() == 'dqn':
         from ray.rllib.algorithms.dqn import DQNConfig
         config = (
             DQNConfig()
-            .environment(env="MiniGrid-CustomPlayground-v0")
-            .rollouts(
-                num_rollout_workers=args.num_rollout_workers,
-                num_envs_per_worker=args.num_envs_per_worker,
-                batch_mode="truncate_episodes",  # Necessary for RNNs
+            .api_stack(
+                enable_env_runner_and_connector_v2=False, enable_rl_module_and_learner=False
             )
-            .exploration(
-                explore=True,
-                exploration_config={
-                    "type": "EpsilonGreedy",
-                    "initial_epsilon": 1.0,
-                    "final_epsilon": 0.1,
-                    "epsilon_timesteps": 10000,
-                }
+            .environment(env="MiniGrid-CustomPlayground-v0")
+            .env_runners(
+                num_env_runners=args.num_rollout_workers,
+                num_envs_per_env_runner=args.num_envs_per_worker,
+                batch_mode="truncate_episodes",  # Necessary for RNNs
+                num_cpus_per_env_runner=total_cpus / args.num_rollout_workers,
+                num_gpus_per_env_runner=args.num_gpus / args.num_rollout_workers,
             )
             .callbacks(AccuracyCallback)
             .training(
                 lr=0.00025,
                 optimizer={"type": "Adam"},
-                model={
-                    "conv_filters": [
-                        [32, [3, 3], 2],
-                        [64, [3, 3], 2],
-                        [128, [3, 3], 2],
-                        [256, [1, 1], 1],
-                    ],
-                    "conv_activation": "relu",
-                    "fcnet_hiddens": [512],
-                    "fcnet_activation": "relu",
-                    "use_lstm": False,
-                    "lstm_cell_size": 256,
-                    "max_seq_len": 16,
-                    "lstm_use_prev_reward": True,
-                    "lstm_use_prev_action": True,
-                },
                 gamma=0.99,
                 train_batch_size=32,
                 dueling=True,
                 double_q=True,
                 n_step=3,
                 target_network_update_freq=500,
-                replay_buffer_config={
-                    "type": "ReplayBuffer",
-                    "capacity": 50000,  # Replay buffer capacity
-                    "replay_sequence_length": 16,  # Ensure sequence handling
-                    "seq_lens": 16,  # Ensure sequence handling
-                }
+                replay_buffer_config={"type": ReplayBuffer,
+                                      # "capacity": 50000
+                                      },
+                model=dict(
+                    conv_filters=[
+                        [32, [3, 3], 2],
+                        [64, [3, 3], 2],
+                        [128, [3, 3], 2],
+                        [256, [1, 1], 1],
+                    ],
+                    conv_activation="relu",
+                    fcnet_hiddens=[512],
+                    fcnet_activation="relu",
+                    use_lstm=False,
+                    lstm_cell_size=64,
+                    max_seq_len=16,
+                ),
             )
             .resources(
-                num_gpus=args.num_gpus,
-                num_cpus_per_worker=total_cpus / args.num_rollout_workers,
-                num_gpus_per_worker=args.num_gpus / args.num_rollout_workers,
-            )
+                num_gpus=args.num_gpus, )
             .framework("torch")
             .fault_tolerance(
-                recreate_failed_workers=True,
+                restart_failed_env_runners=True,
                 restart_failed_sub_environments=True
             )
         )
@@ -253,7 +257,7 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
 
 if __name__ == "__main__":
     # Initialize Ray
-    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus)
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=False)
 
     # Get current date and time
     now = datetime.datetime.now()
@@ -264,11 +268,6 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(output_folder_path, "results"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "checkpoint"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "results", f"result_{formatted_time}"), exist_ok=True)
-
-    # Initialize net, criterion, optimizer
-    net = MiniGridNet()
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), lr=0.001)
 
     # Register the custom environment
     register_env("MiniGrid-CustomPlayground-v0",
@@ -285,9 +284,6 @@ if __name__ == "__main__":
     config = get_trainer_config(
         args.algo,
         args,
-        net,
-        criterion,
-        optimizer,
         total_cpus,
         output_folder_path,
         formatted_time
@@ -304,7 +300,7 @@ if __name__ == "__main__":
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
     # Training loop
-    for i in range(args.start, args.end + 1):
+    for i in tqdm(range(args.start, args.end + 1)):
         result = trainer.train()
 
         if i % args.checkpoint_size == 0:

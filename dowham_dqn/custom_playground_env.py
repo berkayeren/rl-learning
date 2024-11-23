@@ -87,6 +87,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
         self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
 
         super().__init__(
+            minNumRooms=4, maxNumRooms=4, maxRoomSize=10,
             max_steps=200, agent_view_size=size, render_mode=render_mode,
             **kwargs
         )
