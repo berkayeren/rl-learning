@@ -2,16 +2,13 @@ import argparse
 import datetime
 import os
 import sys
-from collections import deque
 from typing import Optional, Union, Dict
 
 import numpy as np
 import ray
-import torch
 import torch.nn as nn
 from minigrid.wrappers import ImgObsWrapper
-from ray.experimental.tqdm_ray import tqdm
-from ray.rllib import BaseEnv, Policy, SampleBatch
+from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
@@ -86,7 +83,8 @@ class AccuracyCallback(DefaultCallbacks):
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
-
+        x, y = env.agent_pos
+        self.states[x][y] += 1
         episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
         episode.custom_metrics["step_done"] = env.done
 
@@ -110,6 +108,16 @@ class AccuracyCallback(DefaultCallbacks):
         episode.custom_metrics["done"] = env.action_count[6]
         episode.custom_metrics["success_rate"] = env.success_rate
         episode.custom_metrics["success_history_len"] = len(env.success_history)
+        total_size = self.width * self.height
+        # Calculate the number of unique states visited by the agent
+        unique_states_visited = np.count_nonzero(self.states)
+
+        # Calculate the percentage of the environment the agent has visited
+        percentage_visited = (unique_states_visited / total_size) * 100
+
+        # Log the percentage
+        episode.custom_metrics["percentage_visited"] = percentage_visited
+
         # print(
         #     f"Reward:{episode.total_reward} | env.success_rate:{env.success_rate} | Len:{len(env.success_history)} | env.minNumRooms:{env.minNumRooms}")
 
@@ -253,7 +261,7 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
 
 if __name__ == "__main__":
     # Initialize Ray
-    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus)
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=False)
 
     # Get current date and time
     now = datetime.datetime.now()

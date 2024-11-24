@@ -7,7 +7,7 @@ import numpy as np
 from gymnasium.envs.registration import EnvSpec
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Door, Key
-from minigrid.envs import MultiRoomEnv
+from minigrid.envs import FourRoomsEnv
 
 
 def hash_dict(d):
@@ -44,7 +44,7 @@ class MiniGridNet(nn.Module):
         return x
 
 
-class CustomPlaygroundEnv(MultiRoomEnv):
+class CustomPlaygroundEnv(FourRoomsEnv):
     def __str__(self):
         if self.agent_pos is None:
             self.reset()
@@ -53,6 +53,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
     def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=7, render_mode=None, **kwargs):
         self.agent_pos = (1, 1)
+        self.goal_pos = (16, 16)
         self.agent_dir = 0
         self.success_rate: float = 0.0
         self.done = False
@@ -81,13 +82,14 @@ class CustomPlaygroundEnv(MultiRoomEnv):
 
         self.episode_history = []
 
-        self.minNumRooms = kwargs.pop('minNumRooms', 1)
-        self.maxNumRooms = kwargs.pop('maxNumRooms', 1)
+        self.minNumRooms = kwargs.pop('minNumRooms', 4)
+        self.maxNumRooms = kwargs.pop('maxNumRooms', 4)
         self.maxRoomSize = kwargs.pop('maxRoomSize', 10)
         self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
 
         super().__init__(
             max_steps=200, agent_view_size=size, render_mode=render_mode,
+            agent_pos=self.agent_pos, goal_pos=self.goal_pos,
             **kwargs
         )
 
@@ -98,7 +100,7 @@ class CustomPlaygroundEnv(MultiRoomEnv):
     def _gen_mission():
         return "traverse the rooms to get to the goal"
 
-    def _gen_grid(self, width, height):
+    def __gen_grid(self, width, height):
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
         # Place a vertical wall to divide the grid into two halves
