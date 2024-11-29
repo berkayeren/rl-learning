@@ -202,7 +202,7 @@ soupsieve==2.5
 stack-data==0.6.3
 starlette==0.35.1
 statsmodels==0.14.4
-sympy==1.12
+sympy==1.13.1
 tensorboard==2.18.0
 tensorboard-data-server==0.7.2
 tensorboardX==2.6.2.2
