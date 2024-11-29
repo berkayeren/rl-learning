@@ -123,7 +123,7 @@ def get_trainer_config(
                 target_network_update_freq=500,
                 replay_buffer_config={
                     "type": "ReplayBuffer",
-                    "capacity": 50000,  # Replay buffer capacity
+                    "capacity": 10000,  # Replay buffer capacity
                     "replay_sequence_length": 16,  # Ensure sequence handling
                     "seq_lens": 16,  # Ensure sequence handling
                 }
@@ -149,6 +149,13 @@ def get_trainer_config(
                 num_envs_per_worker=args.num_envs_per_worker
             )
             .callbacks(partial(callback, path=output_folder_path))
+            .evaluation(
+                evaluation_parallel_to_training=False,
+                evaluation_sample_timeout_s=320,
+                evaluation_interval=10,
+                evaluation_duration=4,
+                evaluation_num_workers=1
+            )
             .training(
                 model={
                     "conv_filters": [
