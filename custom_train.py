@@ -2,29 +2,32 @@ import argparse
 import datetime
 import os
 import sys
-from typing import Optional, Union, Dict
+from functools import partial
+from typing import Union
 
-import numpy as np
+import gymnasium as gym
 import ray
-import torch.nn as nn
-from minigrid.wrappers import ImgObsWrapper
-from ray.rllib import BaseEnv, Policy
-from ray.rllib.algorithms.callbacks import DefaultCallbacks
-from ray.rllib.evaluation.episode_v2 import EpisodeV2
-from ray.rllib.models import ModelCatalog
-from ray.rllib.utils.typing import PolicyID
+from gymnasium.wrappers import ResizeObservation
+from minigrid.wrappers import ImgObsWrapper, RGBImgPartialObsWrapper
+from ray.experimental.tqdm_ray import tqdm
 from ray.tune import register_env
-from torch import optim
 
-from custom_dqn_model import NatureCNN
-from custom_playground_env import CustomPlaygroundEnv, MiniGridNet
+from callbacks.minigrid.callback import MinigridCallback
+from callbacks.pacman.callback import PacmanCallback
+from environments.minigrid_env import CustomPlaygroundEnv
+from environments.pacman_env import PacmanWrapper
 
-# Suppress Deprecation Warnings and Ray duplicate logs
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 os.environ["RAY_DEDUP_LOGS"] = "0"
+os.environ['PYTHONUNBUFFERED'] = "1"
+os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
+os.environ['RAY_DEDUP_LOGS'] = "0"
+os.environ['RAY_GRAFANA_HOST'] = "http://localhost:3000"
+os.environ['RAY_GRAFANA_IFRAME_HOST'] = "http://localhost:3000"
+os.environ['RAY_PROMETHEUS_HOST'] = "http://localhost:9090"
 
 # Register the custom model
-ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
+# ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
 
 # Argument parser setup
 parser = argparse.ArgumentParser(description="Custom training script")
@@ -33,6 +36,7 @@ parser.add_argument('--num_rollout_workers', type=int, help='The number of rollo
 parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
 parser.add_argument('--num_gpus', type=int, help='The number of GPUs', default=0)
 parser.add_argument('--algo', type=str, help='The algorithm to use (dqn or ppo)', default='dqn')
+parser.add_argument('--env', type=str, help='The environment to use (minigrid or pacman)', default='minigrid')
 parser.add_argument('--start', type=int, help='Start Index', default=0)
 parser.add_argument('--end', type=int, help='End Index', default=50000)
 parser.add_argument('--restore', action='store_true', help='Restore from checkpoint')
@@ -50,91 +54,36 @@ current_dir = os.getcwd()
 output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_folder)
 
 
-class AccuracyCallback(DefaultCallbacks):
-    def __init__(self, path=output_folder_path):
-        super().__init__()
-        self.states = None
-        self.height = 0
-        self.width = 0
-        self.path = path
+def get_trainer_config(
+        env_name: str,
+        algo_name: str,
+        args: argparse.Namespace,
+        total_cpus: int,
+        output_folder_path: str,
+        formatted_time: str,
+        callback: Union[MinigridCallback, PacmanCallback, None]
+) -> Union["DQNConfig", "PPOConfig"]:
+    """
+    Generates the trainer configuration for the specified algorithm and environment.
 
-    def on_episode_start(
-            self,
-            *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            policies: Dict[PolicyID, Policy],
-            episode: Union["Episode", "EpisodeV2"],
-            env_index: Optional[int] = None,
-            **kwargs,
-    ) -> None:
-        self.visited_states = set()
-        self.height = base_env.get_sub_environments()[env_index].unwrapped.height
-        self.width = base_env.get_sub_environments()[env_index].unwrapped.width
-        self.states = np.full((self.width, self.height), 0)
+    Args:
+        env_name (str): The name of the environment to use.
+        algo_name (str): The name of the algorithm to use (e.g., 'dqn' or 'ppo').
+        args (argparse.Namespace): Parsed command-line arguments.
+        total_cpus (int): The total number of CPUs available.
+        output_folder_path (str): The path to the output folder for saving results and checkpoints.
+        formatted_time (str): The formatted current date and time.
+        callback (Union[MinigridCallback, PacmanCallback, None]): The callback class to use for custom metrics and logging.
 
-    def on_episode_step(
-            self,
-            *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            episode: "EpisodeV2",
-            env_index: Optional[int] = None,
-            **kwargs,
-    ) -> None:
-        env = base_env.get_sub_environments()[env_index].unwrapped
-        x, y = env.agent_pos
-        self.states[x][y] += 1
-        episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
-        episode.custom_metrics["step_done"] = env.done
+    Returns:
+        Union["DQNConfig", "PPOConfig"]: The configuration object for the specified algorithm.
+    """
 
-    def on_episode_end(
-            self,
-            *,
-            worker: "RolloutWorker",
-            base_env: BaseEnv,
-            policies: Dict[PolicyID, Policy],
-            episode: EpisodeV2,
-            env_index: Optional[int] = None,
-            **kwargs,
-    ) -> None:
-        env = base_env.get_sub_environments()[env_index].unwrapped
-        episode.custom_metrics["left"] = env.action_count[0]
-        episode.custom_metrics["right"] = env.action_count[1]
-        episode.custom_metrics["forward"] = env.action_count[2]
-        episode.custom_metrics["pickup"] = env.action_count[3]
-        episode.custom_metrics["drop"] = env.action_count[4]
-        episode.custom_metrics["toggle"] = env.action_count[5]
-        episode.custom_metrics["done"] = env.action_count[6]
-        episode.custom_metrics["success_rate"] = env.success_rate
-        episode.custom_metrics["success_history_len"] = len(env.success_history)
-        total_size = self.width * self.height
-        # Calculate the number of unique states visited by the agent
-        unique_states_visited = np.count_nonzero(self.states)
-
-        # Calculate the percentage of the environment the agent has visited
-        percentage_visited = (unique_states_visited / total_size) * 100
-
-        # Log the percentage
-        episode.custom_metrics["percentage_visited"] = percentage_visited
-
-        # print(
-        #     f"Reward:{episode.total_reward} | env.success_rate:{env.success_rate} | Len:{len(env.success_history)} | env.minNumRooms:{env.minNumRooms}")
-
-    # def on_learn_on_batch(
-    #        self, *, policy: Policy, train_batch: SampleBatch, result: dict, **kwargs
-    # ) -> None:
-    #    seq_lens = train_batch.get("seq_lens", 16)
-    #    train_batch['seq_lens'] = np.full_like(seq_lens, 16)
-    #    super().on_learn_on_batch(policy=policy, train_batch=train_batch, result=result, **kwargs)
-
-
-def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, output_folder_path, formatted_time):
     if algo_name.lower() == 'dqn':
         from ray.rllib.algorithms.dqn import DQNConfig
         config = (
             DQNConfig()
-            .environment(env="MiniGrid-CustomPlayground-v0")
+            .environment(env=env_name, disable_env_checking=True)
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
@@ -148,26 +97,23 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
                     "final_epsilon": 0.1,
                     "epsilon_timesteps": 10000,
                 }
+            ).evaluation(
+                evaluation_parallel_to_training=False,
+                evaluation_sample_timeout_s=320,
+                evaluation_interval=10,
+                evaluation_duration=4,
+                evaluation_num_workers=0
             )
-            .callbacks(AccuracyCallback)
+            .callbacks(partial(callback, path=output_folder_path))
             .training(
                 lr=0.00025,
                 optimizer={"type": "Adam"},
                 model={
+                    "dim": 88,
                     "conv_filters": [
-                        [32, [3, 3], 2],
-                        [64, [3, 3], 2],
-                        [128, [3, 3], 2],
-                        [256, [1, 1], 1],
+                        [16, [8, 8], 8],
+                        [128, [11, 11], 1],
                     ],
-                    "conv_activation": "relu",
-                    "fcnet_hiddens": [512],
-                    "fcnet_activation": "relu",
-                    "use_lstm": False,
-                    "lstm_cell_size": 256,
-                    "max_seq_len": 16,
-                    "lstm_use_prev_reward": True,
-                    "lstm_use_prev_action": True,
                 },
                 gamma=0.99,
                 train_batch_size=32,
@@ -197,12 +143,12 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
         from ray.rllib.algorithms.ppo import PPOConfig
         config = (
             PPOConfig()
-            .environment(env="MiniGrid-CustomPlayground-v0")
+            .environment(env=env_name, disable_env_checking=True)
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker
             )
-            .callbacks(AccuracyCallback)
+            .callbacks(partial(callback, path=output_folder_path))
             .training(
                 model={
                     "conv_filters": [
@@ -261,45 +207,63 @@ def get_trainer_config(algo_name, args, net, criterion, optimizer, total_cpus, o
 
 if __name__ == "__main__":
     # Initialize Ray
-    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=False)
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True)
 
     # Get current date and time
     now = datetime.datetime.now()
     formatted_time = now.strftime("%Y-%m-%d_%H-%M")
-
+    output_folder_path += f"_{args.algo}_{args.env}"
     # Create output directories
     os.makedirs(output_folder_path, exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "results"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "checkpoint"), exist_ok=True)
     os.makedirs(os.path.join(output_folder_path, "results", f"result_{formatted_time}"), exist_ok=True)
 
-    # Initialize net, criterion, optimizer
-    net = MiniGridNet()
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), lr=0.001)
+    env: Union[PacmanWrapper, ImgObsWrapper] = None
+    env_name: str = ""
+    callback: Union[MinigridCallback, PacmanCallback]
 
-    # Register the custom environment
-    register_env("MiniGrid-CustomPlayground-v0",
-                 lambda config: ImgObsWrapper(CustomPlaygroundEnv(
-                     render_mode=args.render_mode,
-                     enable_dowham_reward=args.enable_dowham_reward,
-                 )))
+    if args.env == "pacman":
+        from ale_py import ALEInterface
 
+        ale = ALEInterface()
+        env_name = "Pacman-CustomPlayground-v0"
+        env = PacmanWrapper(ResizeObservation(gym.make("ALE/Pacman-v5", render_mode=args.render_mode, obs_type="rgb"),
+                                              shape=(88, 88)))
+        callback = PacmanCallback
+
+    if args.env == "minigrid":
+        env_name = "MiniGrid-CustomPlayground-v0"
+        env = ImgObsWrapper(RGBImgPartialObsWrapper(CustomPlaygroundEnv(
+            render_mode=args.render_mode,
+            enable_dowham_reward=args.enable_dowham_reward,
+        )))
+        callback = MinigridCallback
+
+    assert isinstance(env, (PacmanWrapper, ImgObsWrapper)), "env must be either PacmanWrapper or ImgObsWrapper"
+
+    register_env(env_name,
+                 lambda config: env)
     # Get total CPUs
     total_cpus = os.cpu_count()
     print(f"Total number of available CPUs: {total_cpus}")
 
     # Get trainer configuration based on algorithm
     config = get_trainer_config(
+        env_name,
         args.algo,
         args,
-        net,
-        criterion,
-        optimizer,
         total_cpus,
         output_folder_path,
-        formatted_time
+        formatted_time,
+        callback
     )
+
+    if args.env == "pacman":
+        config.callbacks(None)
+
+    config['observation_space'] = env.observation_space
+    config['action_space'] = env.action_space
 
     # Build the trainer
     trainer = config.build()
@@ -312,7 +276,7 @@ if __name__ == "__main__":
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
     # Training loop
-    for i in range(args.start, args.end + 1):
+    for i in tqdm(range(args.start, args.end + 1)):
         result = trainer.train()
 
         if i % args.checkpoint_size == 0:

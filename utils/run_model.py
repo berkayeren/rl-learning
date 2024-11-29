@@ -7,6 +7,8 @@ from typing import Optional, Union, Dict
 import numpy as np
 import pandas as pd
 import ray
+from custom_dqn_model import MinigridPolicyNet
+from custom_playground_env import CustomPlaygroundEnv
 from minigrid.wrappers import ImgObsWrapper
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import DQN
@@ -17,9 +19,6 @@ from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
-
-from custom_dqn_model import MinigridPolicyNet
-from custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
