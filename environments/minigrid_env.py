@@ -3,6 +3,7 @@ import hashlib
 import random
 
 import numpy as np
+from gymnasium.envs.registration import EnvSpec
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Door, Key, Goal
 from minigrid.envs import FourRoomsEnv
@@ -62,14 +63,15 @@ class CustomPlaygroundEnv(FourRoomsEnv):
         self.maxNumRooms = kwargs.pop('maxNumRooms', 4)
         self.maxRoomSize = kwargs.pop('maxRoomSize', 10)
         self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
+        self.env_name = kwargs.pop('env_name', "CustomPlaygroundEnv-v0")
+        self.spec = EnvSpec(self.env_name, max_episode_steps=200)
 
         super().__init__(
             max_steps=200, agent_view_size=size, render_mode=render_mode,
             agent_pos=self.agent_pos, goal_pos=self.goal_pos, tile_size=8,
             **kwargs
         )
-
-        # self.spec = EnvSpec("CustomPlaygroundEnv-v0", max_episode_steps=200)
+        self.max_steps = 200
         self.success_history = collections.deque(maxlen=1024)
 
     @staticmethod

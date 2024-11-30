@@ -266,9 +266,6 @@ if __name__ == "__main__":
         callback
     )
 
-    if args.env == "pacman":
-        config.callbacks(None)
-
     config['observation_space'] = env.observation_space
     config['action_space'] = env.action_space
 
