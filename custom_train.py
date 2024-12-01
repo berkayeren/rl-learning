@@ -7,7 +7,7 @@ from typing import Union
 
 import gymnasium as gym
 import ray
-from gymnasium.wrappers import ResizeObservation
+from gymnasium.wrappers import ResizeObservation, TimeLimit
 from minigrid.wrappers import ImgObsWrapper, RGBImgPartialObsWrapper
 from ray.experimental.tqdm_ray import tqdm
 from ray.tune import register_env
@@ -241,10 +241,16 @@ if __name__ == "__main__":
 
     if args.env == "minigrid":
         env_name = "MiniGrid-CustomPlayground-v0"
-        env = ImgObsWrapper(RGBImgPartialObsWrapper(CustomPlaygroundEnv(
-            render_mode=args.render_mode,
-            enable_dowham_reward=args.enable_dowham_reward,
-        )))
+        env = ImgObsWrapper(
+            RGBImgPartialObsWrapper(
+                TimeLimit(
+                    CustomPlaygroundEnv(
+                        render_mode=args.render_mode,
+                        enable_dowham_reward=args.enable_dowham_reward,
+                    ), max_episode_steps=200
+                )
+            )
+        )
         callback = MinigridCallback
 
     assert isinstance(env, (PacmanWrapper, ImgObsWrapper)), "env must be either PacmanWrapper or ImgObsWrapper"
