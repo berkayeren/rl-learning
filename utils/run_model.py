@@ -7,6 +7,8 @@ from typing import Optional, Union, Dict
 import numpy as np
 import pandas as pd
 import ray
+from custom_dqn_model import MinigridPolicyNet
+from custom_playground_env import CustomPlaygroundEnv
 from minigrid.wrappers import ImgObsWrapper
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import DQN
@@ -17,9 +19,6 @@ from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.typing import PolicyID
 from ray.tune import register_env
-
-from dowham_dqn.custom_dqn_model import MinigridPolicyNet
-from dowham_dqn.custom_playground_env import CustomPlaygroundEnv
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
@@ -242,20 +241,22 @@ if __name__ == "__main__":
         observation, _ = env.reset()
 
         while not done:
+
             # Compute the action using the trained policy
             action = dqn_trainer.compute_single_action(observation=observation, prev_action=action, prev_reward=reward)
             # Take the action in the environment
             observation, reward, done, info, _ = env.step(action)
-
+            print(env.agent_pos)
             visited_states.setdefault(env.agent_pos, 0)
             visited_states[env.agent_pos] += 1
-
+            if env.step_count >= 100000:
+                done = True
             if render_mode == 'human':
                 env.render()
 
         # Convert the dictionary to a DataFrame
         date_string = datetime.now().strftime("%Y-%m-%d-%H%M")
         df = pd.DataFrame(list(visited_states.items()))
-        df.to_csv(f'trail-algo{args.algo}-{episode}_{date_string}.csv', index=False)
+        df.to_csv(f'trail-algo{args.algo}-episode{episode}-checkpoint{args.checkpoint}-{date_string}.csv', index=False)
 
     ray.shutdown()
