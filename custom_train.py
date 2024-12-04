@@ -111,9 +111,13 @@ def get_trainer_config(
                 model={
                     "dim": 88,
                     "conv_filters": [
-                        [16, [8, 8], 8],
-                        [128, [11, 11], 1],
+                        [32, [3, 3], 5],  # Layer 1
+                        [64, [3, 3], 5],  # Layer 2
+                        [128, [3, 3], 2],  # Layer 3
                     ],
+                    "conv_activation": "relu",
+                    "fcnet_hiddens": [1024, 1024],
+                    "post_fcnet_activation": "tanh"
                 },
                 gamma=0.99,
                 train_batch_size=32,
@@ -123,7 +127,7 @@ def get_trainer_config(
                 target_network_update_freq=500,
                 replay_buffer_config={
                     "type": "ReplayBuffer",
-                    "capacity": 10000,  # Replay buffer capacity
+                    "capacity": 50000,  # Replay buffer capacity
                     "replay_sequence_length": 16,  # Ensure sequence handling
                     "seq_lens": 16,  # Ensure sequence handling
                 }
@@ -158,27 +162,27 @@ def get_trainer_config(
             )
             .training(
                 model={
+                    "dim": 88,
                     "conv_filters": [
-                        [32, [3, 3], 2],  # 1st layer: 32 filters, 3x3 kernel, stride 2
-                        [64, [3, 3], 2],  # 2nd layer: 64 filters, 3x3 kernel, stride 2
-                        [128, [3, 3], 2],  # 3rd layer: 128 filters, 3x3 kernel, stride 2
-                        [256, [1, 1], 1],  # 4th layer: 256 filters, 1x1 kernel, stride 1
+                        [32, [3, 3], 5],  # Layer 1
+                        [64, [3, 3], 5],  # Layer 2
+                        [128, [3, 3], 2],  # Layer 3
                     ],
-                    "conv_activation": "relu",  # Activation function
-                    "fcnet_hiddens": [512],  # Fully connected layers with 512 units
-                    "fcnet_activation": "relu",  # Activation function for fully connected layers
-                    "vf_share_layers": True,  # share layers between actor and critic
-                    "use_lstm": True,  # Enable LSTM
-                    "lstm_cell_size": 256,  # Size of the LSTM cell
-                    "max_seq_len": 16,  # Maximum sequence length
-                    # Optional: Include previous actions and rewards in the LSTM input
-                    "lstm_use_prev_reward": True,
+                    "conv_activation": "relu",
+                    "fcnet_hiddens": [1024, 1024],
+                    "post_fcnet_activation": "tanh",
+                    "use_lstm": True,
+                    "lstm_cell_size": 256,
+                    "max_seq_len": 20,
                     "lstm_use_prev_action": True,
+                    "lstm_use_prev_reward": True,
+                    "vf_share_layers": False,
+                    "post_fcnet_hiddens": [1024],
                 },
                 gamma=0.99,  # Discount factor
                 lr=0.00025,  # Learning rate from the best config
-                train_batch_size=32,  # Batch size
-                sgd_minibatch_size=16,  # Size of SGD minibatches
+                train_batch_size=4000,  # Batch size
+                sgd_minibatch_size=64,  # Size of SGD minibatches
                 num_sgd_iter=10,  # Number of SGD iterations per epoch
                 clip_param=0.2,  # PPO clip parameter
                 entropy_coeff=0.05,  # Entropy regularization coefficient
@@ -214,7 +218,7 @@ def get_trainer_config(
 
 if __name__ == "__main__":
     # Initialize Ray
-    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True)
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=False)
 
     # Get current date and time
     now = datetime.datetime.now()

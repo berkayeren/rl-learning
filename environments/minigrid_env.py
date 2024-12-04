@@ -72,7 +72,7 @@ class CustomPlaygroundEnv(FourRoomsEnv):
             **kwargs
         )
         self.max_steps = 200
-        self.success_history = collections.deque(maxlen=1024)
+        self.success_history = collections.deque(maxlen=512)
 
     @staticmethod
     def _gen_mission():
