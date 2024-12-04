@@ -99,10 +99,10 @@ def get_trainer_config(
                 }
             ).evaluation(
                 evaluation_parallel_to_training=False,
-                evaluation_sample_timeout_s=320,
-                evaluation_interval=10,
-                evaluation_duration=4,
-                evaluation_num_workers=0
+                evaluation_interval=100,
+                evaluation_duration=10,
+                evaluation_num_workers=0,
+                evaluation_sample_timeout_s=60
             )
             .callbacks(partial(callback, path=output_folder_path))
             .training(
@@ -155,10 +155,10 @@ def get_trainer_config(
             .callbacks(partial(callback, path=output_folder_path))
             .evaluation(
                 evaluation_parallel_to_training=False,
-                evaluation_sample_timeout_s=320,
-                evaluation_interval=10,
-                evaluation_duration=4,
-                evaluation_num_workers=1
+                evaluation_interval=100,
+                evaluation_duration=10,
+                evaluation_num_workers=0,
+                evaluation_sample_timeout_s=60
             )
             .training(
                 model={
@@ -218,7 +218,7 @@ def get_trainer_config(
 
 if __name__ == "__main__":
     # Initialize Ray
-    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=False)
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True)
 
     # Get current date and time
     now = datetime.datetime.now()
