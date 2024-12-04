@@ -9,7 +9,6 @@ import gymnasium as gym
 import ray
 from gymnasium.wrappers import ResizeObservation, TimeLimit
 from minigrid.wrappers import ImgObsWrapper, RGBImgPartialObsWrapper
-from ray.experimental.tqdm_ray import tqdm
 from ray.tune import register_env
 
 from callbacks.minigrid.callback import MinigridCallback
@@ -290,7 +289,7 @@ if __name__ == "__main__":
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
     # Training loop
-    for i in tqdm(range(args.start, args.end + 1)):
+    for i in range(args.start, args.end + 1):
         result = trainer.train()
 
         if i % args.checkpoint_size == 0:
