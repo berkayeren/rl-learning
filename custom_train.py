@@ -9,6 +9,7 @@ import gymnasium as gym
 import ray
 from gymnasium.wrappers import ResizeObservation, TimeLimit
 from minigrid.wrappers import ImgObsWrapper, RGBImgPartialObsWrapper
+from ray.experimental.tqdm_ray import tqdm
 from ray.tune import register_env
 
 from callbacks.minigrid.callback import MinigridCallback
@@ -44,6 +45,7 @@ parser.add_argument('--enable_dowham_reward', action='store_true', help='Enable 
 parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
 parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
 parser.add_argument('--checkpoint_size', type=int, help='Iteration Number to take checkpoint', default=100000)
+parser.add_argument('--use_tqdm', action='store_true', help='Use Tqdm')
 args = parser.parse_args()
 
 # Set up output folder path
@@ -133,7 +135,7 @@ def get_trainer_config(
             )
             .resources(
                 num_gpus=args.num_gpus,
-                num_cpus_per_worker=total_cpus / args.num_rollout_workers,
+                num_cpus_per_worker=1,
                 num_gpus_per_worker=args.num_gpus / args.num_rollout_workers,
             )
             .framework("torch")
@@ -288,8 +290,12 @@ if __name__ == "__main__":
         except ValueError:
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
+    range_i = range(args.start, args.end + 1)
+    if args.use_tqdm:
+        range_i = tqdm(range_i)
+
     # Training loop
-    for i in range(args.start, args.end + 1):
+    for i in range_i:
         result = trainer.train()
 
         if i % args.checkpoint_size == 0:

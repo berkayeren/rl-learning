@@ -36,8 +36,9 @@ class DoWhaMIntrinsicReward:
     def calculate_bonus(self, obs, action):
         U = self.usage_counts[obs].get(action, 1)
         E = self.effectiveness_counts[obs].get(action, 0)
-        term = (E ** self.H) / (U ** self.H)
-        exp_term = self.eta ** (1 - term)
+        ratio = E / U
+        term = ratio ** self.H
+        exp_term = self.eta ** term
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
