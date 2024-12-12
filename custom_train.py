@@ -200,6 +200,59 @@ def get_trainer_config(
                 restart_failed_sub_environments=True
             )
         )
+    elif algo_name.lower() == 'impala':
+        from ray.rllib.algorithms import ImpalaConfig
+        config = (
+            ImpalaConfig()
+            .environment(env=env_name, disable_env_checking=True)
+            .rollouts(
+                num_rollout_workers=args.num_rollout_workers,
+                num_envs_per_worker=args.num_envs_per_worker,
+                batch_mode="truncate_episodes"
+            )
+            .evaluation(
+                evaluation_parallel_to_training=False,
+                evaluation_interval=100,
+                evaluation_duration=10,
+                evaluation_num_workers=0,
+                evaluation_sample_timeout_s=60
+            )
+            .callbacks(partial(callback, path=output_folder_path))
+            .training(
+                gamma=0.99,  # Discount factor
+                lr=1e-5,  # Learning rate
+                train_batch_size=32,  # Batch size
+                entropy_coeff=0.001,  # Entropy cost
+                vf_loss_coeff=40,  # Baseline cost
+                grad_clip=42,  # Max norm gradient
+                optimizer={"type": "RMSProp"},
+                model={
+                    "dim": 88,
+                    "conv_filters": [
+                        [32, [3, 3], 5],  # Layer 1
+                        [64, [3, 3], 5],  # Layer 2
+                        [128, [3, 3], 2],  # Layer 3
+                    ],
+                    "conv_activation": "relu",
+                    "fcnet_hiddens": [1024, 1024],
+                    "post_fcnet_activation": "tanh",
+                    "use_lstm": True,
+                    "lstm_cell_size": 256,  # Example LSTM size
+                    "max_seq_len": 32,  # LSTM unroll length
+                    "vf_share_layers": True,
+                }
+            )
+            .resources(
+                num_gpus=args.num_gpus,
+                num_cpus_per_worker=1,
+                num_gpus_per_worker=(args.num_gpus / args.num_rollout_workers if args.num_rollout_workers > 0 else 0),
+            )
+            .framework("torch")
+            .fault_tolerance(
+                recreate_failed_workers=True,
+                restart_failed_sub_environments=True
+            )
+        )
     else:
         raise ValueError(f"Unknown algorithm specified: {algo_name}")
 
@@ -209,11 +262,18 @@ def get_trainer_config(
         "type": "ray.tune.logger.UnifiedLogger",
         "logdir": os.path.join(output_folder_path, f'results/result_{formatted_time}'),
     }
+
     # Convert back to config class
     if algo_name.lower() == 'dqn':
+        from ray.rllib.algorithms.dqn import DQNConfig
         config = DQNConfig.from_dict(config)
     elif algo_name.lower() == 'ppo':
+        from ray.rllib.algorithms.ppo import PPOConfig
         config = PPOConfig.from_dict(config)
+    elif algo_name.lower() == 'impala':
+        from ray.rllib.algorithms import ImpalaConfig
+        config = ImpalaConfig.from_dict(config)
+
     return config
 
 
