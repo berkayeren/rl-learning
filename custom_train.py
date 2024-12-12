@@ -241,6 +241,9 @@ def get_trainer_config(
                     "lstm_cell_size": 1024,
                     "max_seq_len": 16,  # LSTM unroll length
                     "vf_share_layers": False,
+                    "lstm_use_prev_action": True,
+                    "lstm_use_prev_reward": True,
+                    "post_fcnet_hiddens": [1024],
                 }
             )
             .resources(
