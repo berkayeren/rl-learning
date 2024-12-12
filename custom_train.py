@@ -208,6 +208,7 @@ def get_trainer_config(
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
+                rollout_fragment_length=64,
                 batch_mode="truncate_episodes"
             )
             .evaluation(
@@ -237,9 +238,9 @@ def get_trainer_config(
                     "fcnet_hiddens": [1024, 1024],
                     "post_fcnet_activation": "tanh",
                     "use_lstm": True,
-                    "lstm_cell_size": 256,  # Example LSTM size
-                    "max_seq_len": 32,  # LSTM unroll length
-                    "vf_share_layers": True,
+                    "lstm_cell_size": 1024,
+                    "max_seq_len": 16,  # LSTM unroll length
+                    "vf_share_layers": False,
                 }
             )
             .resources(
