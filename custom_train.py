@@ -63,7 +63,7 @@ def get_trainer_config(
         output_folder_path: str,
         formatted_time: str,
         callback: Union[MinigridCallback, PacmanCallback, None]
-) -> Union["DQNConfig", "PPOConfig"]:
+) -> Union["DQNConfig", "PPOConfig", "ImpalaConfig"]:
     """
     Generates the trainer configuration for the specified algorithm and environment.
 
@@ -88,6 +88,7 @@ def get_trainer_config(
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
+                rollout_fragment_length=200 * args.num_envs_per_worker,
                 batch_mode="truncate_episodes",  # Necessary for RNNs
             )
             .exploration(
@@ -107,8 +108,11 @@ def get_trainer_config(
             )
             .callbacks(partial(callback, path=output_folder_path))
             .training(
-                lr=0.00025,
-                optimizer={"type": "Adam"},
+                gamma=0.99,  # Discount factor
+                lr=1e-5,  # Learning rate
+                train_batch_size=200 * args.num_envs_per_worker * args.num_rollout_workers,  # Batch size
+                grad_clip=42,  # Max norm gradient
+                optimizer={"type": "RMSProp"},
                 model={
                     "dim": 88,
                     "conv_filters": [
@@ -120,8 +124,6 @@ def get_trainer_config(
                     "fcnet_hiddens": [1024, 1024],
                     "post_fcnet_activation": "tanh"
                 },
-                gamma=0.99,
-                train_batch_size=32,
                 dueling=True,
                 double_q=True,
                 n_step=3,
@@ -208,7 +210,7 @@ def get_trainer_config(
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
-                rollout_fragment_length=64,
+                rollout_fragment_length=200 * args.num_envs_per_worker,
                 batch_mode="truncate_episodes"
             )
             .evaluation(
@@ -222,7 +224,7 @@ def get_trainer_config(
             .training(
                 gamma=0.99,  # Discount factor
                 lr=1e-5,  # Learning rate
-                train_batch_size=32,  # Batch size
+                train_batch_size=200 * args.num_envs_per_worker * args.num_rollout_workers,  # Batch size
                 entropy_coeff=0.001,  # Entropy cost
                 vf_loss_coeff=40,  # Baseline cost
                 grad_clip=42,  # Max norm gradient
@@ -261,22 +263,12 @@ def get_trainer_config(
         raise ValueError(f"Unknown algorithm specified: {algo_name}")
 
     # Set up logger config
-    config = config.to_dict()
-    config['logger_config'] = {
-        "type": "ray.tune.logger.UnifiedLogger",
-        "logdir": os.path.join(output_folder_path, f'results/result_{formatted_time}'),
-    }
-
-    # Convert back to config class
-    if algo_name.lower() == 'dqn':
-        from ray.rllib.algorithms.dqn import DQNConfig
-        config = DQNConfig.from_dict(config)
-    elif algo_name.lower() == 'ppo':
-        from ray.rllib.algorithms.ppo import PPOConfig
-        config = PPOConfig.from_dict(config)
-    elif algo_name.lower() == 'impala':
-        from ray.rllib.algorithms import ImpalaConfig
-        config = ImpalaConfig.from_dict(config)
+    config.debugging(
+        logger_config={
+            "type": "ray.tune.logger.UnifiedLogger",
+            "logdir": os.path.join(output_folder_path, f'results/result_{formatted_time}')
+        }
+    )
 
     return config
 
@@ -345,7 +337,7 @@ if __name__ == "__main__":
     config['action_space'] = env.action_space
 
     # Build the trainer
-    trainer = config.build()
+    trainer = config.build(env=env_name)
 
     # Restore from checkpoint if needed
     if args.restore and args.checkpoint_path:
