@@ -196,7 +196,7 @@ def get_trainer_config(
             .training(
                 gamma=0.99,  # Discount factor
                 lr=1e-5,  # Learning rate
-                train_batch_size=100 * args.num_envs_per_worker * args.num_rollout_workers,  # Batch size
+                train_batch_size=10 * args.num_envs_per_worker * args.num_rollout_workers,  # Batch size
                 entropy_coeff=0.001,  # Entropy cost
                 vf_loss_coeff=40,  # Baseline cost
                 grad_clip=42,  # Max norm gradient
