@@ -26,34 +26,6 @@ os.environ['RAY_GRAFANA_HOST'] = "http://localhost:3000"
 os.environ['RAY_GRAFANA_IFRAME_HOST'] = "http://localhost:3000"
 os.environ['RAY_PROMETHEUS_HOST'] = "http://localhost:9090"
 
-# Register the custom model
-# ModelCatalog.register_custom_model("MinigridPolicyNet", NatureCNN)
-
-# Argument parser setup
-parser = argparse.ArgumentParser(description="Custom training script")
-parser.add_argument('--render_mode', type=str, help='The render mode parameter', default=None)
-parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
-parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
-parser.add_argument('--num_gpus', type=int, help='The number of GPUs', default=0)
-parser.add_argument('--algo', type=str, help='The algorithm to use (dqn or ppo)', default='dqn')
-parser.add_argument('--env', type=str, help='The environment to use (minigrid or pacman)', default='minigrid')
-parser.add_argument('--start', type=int, help='Start Index', default=0)
-parser.add_argument('--end', type=int, help='End Index', default=50000)
-parser.add_argument('--restore', action='store_true', help='Restore from checkpoint')
-parser.add_argument('--checkpoint_path', type=str, help='Checkpoint Path', default='')
-parser.add_argument('--enable_dowham_reward', action='store_true', help='Enable DoWham Intrinsic reward')
-parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
-parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
-parser.add_argument('--checkpoint_size', type=int, help='Iteration Number to take checkpoint', default=100000)
-parser.add_argument('--use_tqdm', action='store_true', help='Use Tqdm')
-args = parser.parse_args()
-
-# Set up output folder path
-current_dir = os.getcwd()
-
-# Append the output folder to the current file path
-output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_folder)
-
 
 def get_trainer_config(
         env_name: str,
@@ -246,7 +218,9 @@ def get_trainer_config(
                     "lstm_use_prev_action": True,
                     "lstm_use_prev_reward": True,
                     "post_fcnet_hiddens": [1024],
-                }
+                },
+                replay_proportion=0.5,  # Fraction of replay buffer to use for training
+                replay_buffer_num_slots=10
             )
             .resources(
                 num_gpus=args.num_gpus,
@@ -274,6 +248,30 @@ def get_trainer_config(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Custom training script")
+    parser.add_argument('--render_mode', type=str, help='The render mode parameter', default=None)
+    parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
+    parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
+    parser.add_argument('--num_gpus', type=int, help='The number of GPUs', default=0)
+    parser.add_argument('--algo', type=str, help='The algorithm to use (dqn, ppo or impala)', default='dqn')
+    parser.add_argument('--env', type=str, help='The environment to use (minigrid or pacman)', default='minigrid')
+    parser.add_argument('--start', type=int, help='Start Index', default=0)
+    parser.add_argument('--end', type=int, help='End Index', default=50000)
+    parser.add_argument('--restore', action='store_true', help='Restore from checkpoint')
+    parser.add_argument('--checkpoint_path', type=str, help='Checkpoint Path', default='')
+    parser.add_argument('--enable_dowham_reward', action='store_true', help='Enable DoWham Intrinsic reward')
+    parser.add_argument('--output_folder', type=str, help='Output Folder', default="ray_results")
+    parser.add_argument('--batch_size', type=int, help='Batch Size', default=32)
+    parser.add_argument('--checkpoint_size', type=int, help='Iteration Number to take checkpoint', default=100000)
+    parser.add_argument('--use_tqdm', action='store_true', help='Use Tqdm')
+    args = parser.parse_args()
+
+    # Set up output folder path
+    current_dir = os.getcwd()
+
+    # Append the output folder to the current file path
+    output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_folder)
+
     # Initialize Ray
     ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True)
 

@@ -11,7 +11,7 @@ class DoWhaMIntrinsicReward:
         self.usage_counts = {}
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
-        self.recent_transitions = collections.deque(maxlen=64)  # Track recent state transitions
+        self.recent_transitions = collections.deque(maxlen=200)  # Track recent state transitions
 
     def update_usage(self, obs, action):
         if obs not in self.usage_counts:
