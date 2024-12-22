@@ -1,6 +1,5 @@
 from typing import Dict, List, Tuple
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -223,3 +222,106 @@ class NatureCNN(TorchModelV2, nn.Module):
 
     def value_function(self):
         return self.value_head(self._features).squeeze(1)
+
+
+import numpy as np
+import torch
+import torch.nn as nn
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils.annotations import override
+
+
+class CustomMiniGridLSTM(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # Determine device
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("Using CUDA device")
+        # elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        #     self.device = torch.device("mps")
+        #     print("Using MPS device")
+        else:
+            self.device = torch.device("cpu")
+            print("Using CPU device")
+
+        # Get activation function from model_config
+        print(model_config)
+        activation_fn_name = model_config['custom_model_config'].get("custom_activation", "relu").lower()
+        self.activation_fn = self._get_activation_function(activation_fn_name)
+        print(f"Using activation function: {activation_fn_name}")
+        # Core dimensions
+        self.obs_size = int(np.prod(obs_space.shape))
+        hidden_size = 256  # Reduced size for flattened input
+
+        # Feature extraction layers
+        self.network = nn.Sequential(
+            nn.Linear(self.obs_size, hidden_size),
+            self.activation_fn(),
+            nn.Linear(hidden_size, hidden_size),
+            self.activation_fn(),
+            nn.Linear(hidden_size, self.obs_size),
+            self.activation_fn(),
+        ).to(self.device)
+
+        # Value branch
+        self.value_branch = nn.Sequential(
+            nn.Linear(self.obs_size, hidden_size),
+            self.activation_fn(),
+            nn.Linear(hidden_size, 1)
+        ).to(self.device)
+
+        self._initialize_weights()
+
+        self._features = None
+        self._cur_value = None
+
+    def _initialize_weights(self):
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                nn.init.orthogonal_(param, gain=np.sqrt(2))
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+
+    def _get_activation_function(self, name):
+        """
+        Return the corresponding activation function class based on its name.
+        """
+        activation_map = {
+            "relu": nn.ReLU,
+            "leaky_relu": nn.LeakyReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "softplus": nn.Softplus
+        }
+        return activation_map.get(name, nn.ReLU)
+
+    @override(TorchModelV2)
+    def forward(self, input_dict, state, seq_lens):
+        # Move input to appropriate device
+        x = input_dict["obs"].float().to(self.device)
+
+        # Forward pass
+        self._features = self.network(x)
+        self._cur_value = self.value_branch(self._features).squeeze(1)
+
+        # Move output back to CPU if needed for RLlib
+        if self.device != torch.device("cpu"):
+            self._features = self._features.cpu()
+            self._cur_value = self._cur_value.cpu()
+
+        return self._features, state
+
+    @override(TorchModelV2)
+    def value_function(self):
+        assert self._cur_value is not None, "must call forward() first"
+        return self._cur_value
+
+    def to_device(self, device):
+        """Helper method to move model to a different device"""
+        self.device = device
+        self.network = self.network.to(device)
+        self.value_branch = self.value_branch.to(device)
+        return self

@@ -3,7 +3,7 @@ import collections
 import numpy as np
 
 
-class DoWhaMIntrinsicReward:
+class DoWhaMIntrinsicRewardV2:
     def __init__(self, eta, H, tau):
         self.eta = eta
         self.H = H
