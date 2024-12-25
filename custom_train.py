@@ -199,18 +199,16 @@ def get_trainer_config(
             .callbacks(partial(callback, path=output_folder_path))
             .training(
                 model={
-                    "custom_model": "dowham_lstm",
-                    "custom_model_config": {
-                        "custom_activation": "relu"  # Specify the desired activation function
-                    },
-                    "fcnet_hiddens": [256, 256],  # Reduced for flattened input
+                    "fcnet_hiddens": [1024, 512, 256],  # Reduced for flattened input
+                    "fcnet_activation": "relu",
                     "use_lstm": True,
-                    "lstm_cell_size": 256,  # Reduced LSTM size
+                    "lstm_cell_size": 1024,  # Reduced LSTM size
                     "max_seq_len": max_seq_len,
                     "lstm_use_prev_action": True,
                     "lstm_use_prev_reward": True,
                     "vf_share_layers": False,
-                    "post_fcnet_hiddens": [256],  # Reduced post-LSTM layer
+                    "post_fcnet_hiddens": [1024, 1024],  # Reduced post-LSTM layer
+                    "post_fcnet_activation": "relu",
                 },
                 # Training parameters remain the same as they're not dependent on architecture
                 gamma=0.99,
@@ -218,14 +216,13 @@ def get_trainer_config(
                 entropy_coeff=0.001,
                 vf_loss_coeff=40,
                 grad_clip=42,
-                train_batch_size=2048,
+                train_batch_size=args.batch_size,
                 replay_proportion=0.5,
                 replay_buffer_num_slots=10,
             )
             .resources(
                 num_gpus=args.num_gpus,
                 num_cpus_per_worker=1,
-                num_gpus_per_worker=(args.num_gpus / args.num_rollout_workers if args.num_rollout_workers > 0 else 0),
                 placement_strategy="SPREAD",  # Relax resource allocation strategy
             )
             .framework("torch")
@@ -359,23 +356,25 @@ if __name__ == "__main__":
         dowhamv1_config = copy.deepcopy(base_config)
         dowhamv1_config["env_config"] = {
             "enable_dowham_reward_v1": True,
+            "enable_dowham_reward_v2": False,
             "enable_count_based": False,
             "enable_rnd": False,
         }
-        dowhamv1_config["train_batch_size"] = batch_size
-        dowhamv1_config["model"]["lstm_cell_size"] = 256
+        dowhamv1_config["model"]["fcnet_activation"] = "tanh"
+        dowhamv1_config["model"]["post_fcnet_activation"] = "tanh"
         all_configs.append(dowhamv1_config)
 
         # Create variations for DoWhaM
         dowhamv2_config = copy.deepcopy(base_config)
         dowhamv2_config["env_config"] = {
+            "enable_dowham_reward_v1": False,
             "enable_dowham_reward_v2": True,
             "enable_count_based": False,
             "enable_rnd": False,
         }
-        dowhamv2_config["train_batch_size"] = batch_size
-        dowhamv2_config["model"]["lstm_cell_size"] = 256
-        dowhamv2_config["model"]["custom_model_config"]["custom_activation"] = "tanh"
+        dowhamv2_config["train_batch_size"] = 32
+        dowhamv2_config["model"]["fcnet_activation"] = "tanh"
+        dowhamv2_config["model"]["post_fcnet_activation"] = "tanh"
         all_configs.append(dowhamv2_config)
 
         # Create variations for DoWhaM
@@ -386,27 +385,24 @@ if __name__ == "__main__":
             "enable_count_based": False,
             "enable_rnd": True,
         }
-        rnd_config["train_batch_size"] = batch_size
-        rnd_config["model"]["lstm_cell_size"] = 256
         all_configs.append(rnd_config)
 
         count_based_config = copy.deepcopy(base_config)
         count_based_config["env_config"] = {
-            "enable_dowham_reward": False,
+            "enable_dowham_reward_v1": False,
+            "enable_dowham_reward_v2": False,
             "enable_count_based": True,
             "enable_rnd": False,
         }
-        count_based_config["train_batch_size"] = batch_size
-        count_based_config["model"]["lstm_cell_size"] = 256
         all_configs.append(count_based_config)
 
         without_exp_config = copy.deepcopy(base_config)
         without_exp_config["env_config"] = {
-            "enable_dowham_reward": False,
+            "enable_dowham_reward_v1": False,
+            "enable_dowham_reward_v2": False,
             "enable_count_based": False,
+            "enable_rnd": False,
         }
-        without_exp_config["train_batch_size"] = batch_size
-        without_exp_config["model"]["lstm_cell_size"] = 256
         all_configs.append(without_exp_config)
 
         return all_configs
@@ -447,7 +443,6 @@ if __name__ == "__main__":
         config=tune.grid_search(create_grid_search_configs(config.to_dict(), args.batch_size)),
         stop={
             "timesteps_total": 10_000_000,  # Stop after 1 million timesteps
-            "custom_metrics/percentage_visited_mean": 15.0,
         },
         checkpoint_freq=args.checkpoint_size,  # Save a checkpoint every 10 iterations
         checkpoint_score_attr="episode_reward_mean",  # Save best checkpoints based on reward
