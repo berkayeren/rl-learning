@@ -120,7 +120,10 @@ class CustomPlaygroundEnv(MiniGridEnv):
         if self.enable_rnd:
             print("Enabling Random Network Distillation")
             self.rnd = RNDModule(observation_space=self.observation_space, embed_dim=64,
-                                 reward_scale=self.intrinsic_reward_scaling)
+                                 reward_scale=10)
+
+        self.states = np.full((self.width, self.height), 0)
+        self.total_episode_reward = 0.0
 
     @staticmethod
     def _gen_mission():
@@ -197,6 +200,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         return np.concatenate([grid_flattened, position_flattened, direction_flattened])
 
     def step(self, action):
+        self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action_count[action] += 1
         current_state = self.hash()
         current_obs = self.gen_obs()
@@ -222,7 +226,6 @@ class CustomPlaygroundEnv(MiniGridEnv):
         # Compute intrinsic reward if RND is active
         if self.enable_rnd:
             flat_obs = self.flatten_observation(next_obs)
-            print(f"Flat obs: {flat_obs}")
             self.intrinsic_reward = self.rnd.compute_intrinsic_reward(flat_obs)
 
             # Update predictor network
@@ -233,7 +236,14 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.done = done
 
         if done:
-            reward += max(10, 100 / np.sqrt(sum(self.action_count.values())))
+            total_size = self.width * self.height
+            # Calculate the number of unique states visited by the agent
+            unique_states_visited = np.count_nonzero(self.states)
+
+            # Calculate the percentage of the environment the agent has visited
+            percentage_visited = (unique_states_visited / total_size) * 100
+
+            reward += max(10, int((percentage_visited * self.total_episode_reward) / 100))
 
         return obs, reward, done, info, {}
 
@@ -264,6 +274,8 @@ class CustomPlaygroundEnv(MiniGridEnv):
         if self.enable_rnd:
             self.rnd.update_obs_normalizer(self.flatten_observation(obs))
 
+        self.states = np.full((self.width, self.height), 0)
         self.done = False
+        self.total_episode_reward = 0.0
 
         return obs, {}
