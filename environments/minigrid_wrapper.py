@@ -20,7 +20,6 @@ class FlattenedPositionWrapper(FullyObsWrapper):
         )
 
     def observation(self, observation):
-        # Get the base observation
         observation = super().observation(observation)
 
         # Extract components
