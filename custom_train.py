@@ -11,7 +11,6 @@ from gymnasium.wrappers import ResizeObservation
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 from ray import tune
 from ray.air import CheckpointConfig
-from ray.rllib.models import ModelCatalog
 from ray.tune import register_env
 
 from callbacks.minigrid.callback import MinigridCallback
@@ -19,7 +18,6 @@ from callbacks.pacman.callback import PacmanCallback
 from environments.minigrid_env import CustomPlaygroundEnv
 from environments.minigrid_wrapper import FlattenedPositionWrapper
 from environments.pacman_env import PacmanWrapper
-from models.custom_dqn_model import CustomMiniGridLSTM
 
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 os.environ["RAY_DEDUP_LOGS"] = "0"
@@ -275,7 +273,6 @@ if __name__ == "__main__":
     # Append the output folder to the current file path
     output_folder_path = os.path.join(os.path.dirname(current_dir), args.output_folder)
 
-    ModelCatalog.register_custom_model("dowham_lstm", CustomMiniGridLSTM)
     # Get total CPUs
     total_cpus = os.cpu_count()
     print(f"Total number of available CPUs: {total_cpus}")
