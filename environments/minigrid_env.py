@@ -119,8 +119,8 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         if self.enable_rnd:
             print("Enabling Random Network Distillation")
-            self.rnd = RNDModule(observation_space=self.observation_space, embed_dim=64,
-                                 reward_scale=10)
+            self.rnd = RNDModule(embed_dim=512,
+                                 reward_scale=10 ** 4)
 
         self.states = np.full((self.width, self.height), 0)
         self.total_episode_reward = 0.0
@@ -197,7 +197,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         direction_flattened = np.array([self.agent_dir], dtype=np.float32)
 
         # Concatenate all components into a single flat array
-        return np.concatenate([grid_flattened, position_flattened, direction_flattened])
+        return np.concatenate([grid_flattened, position_flattened, direction_flattened, self.states.flatten()])
 
     def step(self, action):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1

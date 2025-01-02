@@ -65,7 +65,6 @@ class MinigridCallback(DefaultCallbacks):
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
         episode.custom_metrics["success_rate"] = env.success_rate
-        episode.custom_metrics["success_history_len"] = len(env.success_history)
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)

@@ -1,3 +1,4 @@
+import numpy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -48,9 +49,13 @@ class TargetNetwork(nn.Module):
     def __init__(self, input_dim, embed_dim):
         super(TargetNetwork, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 1024),
+            nn.LayerNorm(1024),
             nn.ReLU(),
-            nn.Linear(128, embed_dim)
+            nn.Linear(1024, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, embed_dim)
         )
 
     def forward(self, x):
@@ -63,9 +68,13 @@ class PredictorNetwork(nn.Module):
     def __init__(self, input_dim, embed_dim):
         super(PredictorNetwork, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 1024),
+            nn.LayerNorm(1024),
             nn.ReLU(),
-            nn.Linear(128, embed_dim)
+            nn.Linear(1024, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, embed_dim)
         )
 
     def forward(self, x):
@@ -77,8 +86,8 @@ class RNDModule:
     RND Module to calculate intrinsic rewards and train the predictor network.
     """
 
-    def __init__(self, observation_space, embed_dim=64, predictor_lr=1e-4, reward_scale=0.1):
-        input_dim = 1086
+    def __init__(self, embed_dim=64, predictor_lr=1e-5, reward_scale=0.1):
+        input_dim = 1447  # Hardcoded for the given environment
 
         # Target and Predictor Networks
         self.target_network = TargetNetwork(input_dim, embed_dim)
@@ -107,6 +116,7 @@ class RNDModule:
         """
         Compute the intrinsic reward as the prediction error.
         """
+        observation = numpy.array(observation)
         observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0)  # Add batch dimension
         target_output = self.target_network(observation)
         predictor_output = self.predictor_network(observation)
@@ -120,6 +130,7 @@ class RNDModule:
         """
         Update the predictor network to minimize prediction error.
         """
+        observations = numpy.array(observations)
         observations = torch.tensor(observations, dtype=torch.float32)
         target_output = self.target_network(observations)
         predictor_output = self.predictor_network(observations)

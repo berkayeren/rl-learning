@@ -10,6 +10,7 @@ import ray
 from gymnasium.wrappers import ResizeObservation
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 from ray import tune
+from ray.air import CheckpointConfig
 from ray.rllib.models import ModelCatalog
 from ray.tune import register_env
 
@@ -54,7 +55,7 @@ def get_trainer_config(
     Returns:
         Union["DQNConfig", "PPOConfig"]: The configuration object for the specified algorithm.
     """
-    max_seq_len = 20
+    max_seq_len = 100
     rollout_fragment_length = max_seq_len * 10
 
     if algo_name.lower() == 'dqn':
@@ -185,21 +186,22 @@ def get_trainer_config(
             ImpalaConfig()
             .environment(env=env_name, disable_env_checking=True)
             .rollouts(
+                num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
                 rollout_fragment_length=rollout_fragment_length,
                 batch_mode="truncate_episodes"
             )
             .evaluation(
                 evaluation_parallel_to_training=False,
-                evaluation_interval=100,
-                evaluation_duration=10,
+                evaluation_interval=10,
+                evaluation_duration=100,
                 evaluation_num_workers=0,
                 evaluation_sample_timeout_s=60
             )
             .callbacks(partial(callback, path=output_folder_path))
             .training(
                 model={
-                    "fcnet_hiddens": [1024, 512, 256],  # Reduced for flattened input
+                    "fcnet_hiddens": [1024, 512],  # Reduced for flattened input
                     "fcnet_activation": "relu",
                     "use_lstm": True,
                     "lstm_cell_size": 1024,  # Reduced LSTM size
@@ -217,18 +219,21 @@ def get_trainer_config(
                 vf_loss_coeff=40,
                 grad_clip=42,
                 train_batch_size=args.batch_size,
-                replay_proportion=0.5,
-                replay_buffer_num_slots=10,
+                replay_proportion=0.4,
+                replay_buffer_num_slots=100,
             )
             .resources(
                 num_gpus=args.num_gpus,
                 num_cpus_per_worker=1,
+                num_learner_workers=1,
+                num_cpus_for_local_worker=1,
                 placement_strategy="SPREAD",  # Relax resource allocation strategy
             )
             .framework("torch")
             .fault_tolerance(
                 recreate_failed_workers=True,
-                restart_failed_sub_environments=True
+                restart_failed_sub_environments=True,
+                worker_health_probe_timeout_s=300
             )
         )
     else:
@@ -360,8 +365,6 @@ if __name__ == "__main__":
             "enable_count_based": False,
             "enable_rnd": False,
         }
-        dowhamv1_config["model"]["fcnet_activation"] = "tanh"
-        dowhamv1_config["model"]["post_fcnet_activation"] = "tanh"
         all_configs.append(dowhamv1_config)
 
         # Create variations for DoWhaM
@@ -372,7 +375,6 @@ if __name__ == "__main__":
             "enable_count_based": False,
             "enable_rnd": False,
         }
-        dowhamv2_config["train_batch_size"] = 32
         dowhamv2_config["model"]["fcnet_activation"] = "tanh"
         dowhamv2_config["model"]["post_fcnet_activation"] = "tanh"
         all_configs.append(dowhamv2_config)
@@ -437,21 +439,29 @@ if __name__ == "__main__":
             return f"Default_batch{train_batch_size}"
 
 
+    checkpoint_config = CheckpointConfig(
+        num_to_keep=5,
+        checkpoint_frequency=100,
+        checkpoint_at_end=True,
+        checkpoint_score_attribute="episode_reward_mean",
+        checkpoint_score_order="max"
+    )
+
     # Run training with Ray Tune
     trail = tune.run(
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(create_grid_search_configs(config.to_dict(), args.batch_size)),
         stop={
-            "timesteps_total": 10_000_000,  # Stop after 1 million timesteps
+            "timesteps_total": 10_000_000,  # Stop after 10 million timesteps
         },
-        checkpoint_freq=args.checkpoint_size,  # Save a checkpoint every 10 iterations
-        checkpoint_score_attr="episode_reward_mean",  # Save best checkpoints based on reward
-        checkpoint_at_end=True,  # Save a checkpoint at the end of training
+        checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs
         num_samples=1,  # Only one trial
         trial_name_creator=custom_trial_name,  # Custom trial name
         trial_dirname_creator=custom_trial_name,  # Custom trial name
-        log_to_file=True
+        log_to_file=True,
+        resume="AUTO",
+        max_failures=5
     )
 
     trail.results_df.to_csv(os.path.join(output_folder_path, f"results_{formatted_time}.csv"), index=False)

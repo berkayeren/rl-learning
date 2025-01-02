@@ -248,10 +248,8 @@ class CustomMiniGridLSTM(TorchModelV2, nn.Module):
             print("Using CPU device")
 
         # Get activation function from model_config
-        print(model_config)
         activation_fn_name = model_config['custom_model_config'].get("custom_activation", "relu").lower()
         self.activation_fn = self._get_activation_function(activation_fn_name)
-        print(f"Using activation function: {activation_fn_name}")
         # Core dimensions
         self.obs_size = int(np.prod(obs_space.shape))
         hidden_size = 256  # Reduced size for flattened input
