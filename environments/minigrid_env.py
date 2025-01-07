@@ -3,6 +3,7 @@ import hashlib
 import random
 
 import numpy as np
+from gymnasium import spaces
 from gymnasium.envs.registration import EnvSpec
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
@@ -97,6 +98,12 @@ class CustomPlaygroundEnv(MiniGridEnv):
             height=self.size,
             **kwargs
         )
+
+        self.observation_space = spaces.Dict({
+            'direction': spaces.Discrete(4),
+            'image': spaces.Box(0, 255, (1083,), dtype=np.uint8),
+            'position': spaces.Box(low=0, high=19, shape=(2,), dtype=np.int64)
+        })
 
         self.max_steps = 200
         self.success_history = collections.deque(maxlen=100)
@@ -197,7 +204,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         direction_flattened = np.array([self.agent_dir], dtype=np.float32)
 
         # Concatenate all components into a single flat array
-        return np.concatenate([grid_flattened, position_flattened, direction_flattened, self.states.flatten()])
+        return np.concatenate([grid_flattened, position_flattened, direction_flattened])
 
     def step(self, action):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
@@ -272,10 +279,9 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         # Update observation normalization if RND is active
         if self.enable_rnd:
-            self.rnd.update_obs_normalizer(self.flatten_observation(obs))
+            self.rnd.update_obs_normalizer(self.flatten_observation(self.gen_obs()))
 
         self.states = np.full((self.width, self.height), 0)
         self.done = False
         self.total_episode_reward = 0.0
-
         return obs, {}

@@ -64,20 +64,11 @@ def get_trainer_config(
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
-                rollout_fragment_length=200 * args.num_envs_per_worker,
+                rollout_fragment_length=128,
                 batch_mode="truncate_episodes",  # Necessary for RNNs
-            )
-            .exploration(
-                explore=True,
-                exploration_config={
-                    "type": "EpsilonGreedy",
-                    "initial_epsilon": 1.0,
-                    "final_epsilon": 0.1,
-                    "epsilon_timesteps": 10000,
-                }
             ).evaluation(
                 evaluation_parallel_to_training=False,
-                evaluation_interval=100,
+                evaluation_interval=10,
                 evaluation_duration=10,
                 evaluation_num_workers=0,
                 evaluation_sample_timeout_s=60
@@ -86,16 +77,16 @@ def get_trainer_config(
             .training(
                 gamma=0.99,  # Discount factor
                 lr=1e-5,  # Learning rate
-                train_batch_size=200 * args.num_envs_per_worker * args.num_rollout_workers,  # Batch size
+                train_batch_size=args.batch_size,  # Batch size
                 grad_clip=42,  # Max norm gradient
                 optimizer={"type": "RMSProp"},
                 model={
-                    "dim": 88,
-                    "conv_filters": [
-                        [32, [3, 3], 5],  # Layer 1
-                        [64, [3, 3], 5],  # Layer 2
-                        [128, [3, 3], 2],  # Layer 3
-                    ],
+                    # "dim": 88,
+                    # "conv_filters": [
+                    #     [32, [3, 3], 5],  # Layer 1
+                    #     [64, [3, 3], 5],  # Layer 2
+                    #     [128, [3, 3], 2],  # Layer 3
+                    # ],
                     "conv_activation": "relu",
                     "fcnet_hiddens": [1024, 1024],
                     "post_fcnet_activation": "tanh"
@@ -186,22 +177,23 @@ def get_trainer_config(
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
-                rollout_fragment_length=rollout_fragment_length,
+                rollout_fragment_length=128,
                 batch_mode="truncate_episodes"
             )
             .evaluation(
                 evaluation_parallel_to_training=False,
                 evaluation_interval=10,
-                evaluation_duration=100,
+                evaluation_duration=10,
                 evaluation_num_workers=0,
                 evaluation_sample_timeout_s=60
             )
             .callbacks(partial(callback, path=output_folder_path))
             .training(
                 model={
+                    "conv_filters": None,  # Remove convolutional layers
                     "fcnet_hiddens": [1024, 512],  # Reduced for flattened input
                     "fcnet_activation": "relu",
-                    "use_lstm": True,
+                    "use_lstm": False,
                     "lstm_cell_size": 1024,  # Reduced LSTM size
                     "max_seq_len": max_seq_len,
                     "lstm_use_prev_action": True,
@@ -340,7 +332,7 @@ if __name__ == "__main__":
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
 
-    def create_grid_search_configs(base_config, batch_size):
+    def create_grid_search_configs(base_config: dict):
         import copy
         """
         Creates grid search configurations with different LSTM sizes for each exploration strategy.
@@ -423,17 +415,18 @@ if __name__ == "__main__":
         enable_count_based = env_config.get("enable_count_based", False)
         enable_rnd = env_config.get("enable_rnd", False)
         train_batch_size = trial.config.get("train_batch_size", "unknown")
+        fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
 
         if enable_dowham_reward_v1:
-            return f"DoWhaMV1_batch{train_batch_size}"
+            return f"DoWhaMV1_batch{train_batch_size}{fc}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}"
+            return f"DoWhaMV2_batch{train_batch_size}{fc}"
         elif enable_count_based:
-            return f"CountBased_batch{train_batch_size}"
+            return f"CountBased_batch{train_batch_size}{fc}"
         elif enable_rnd:
-            return f"RND_batch{train_batch_size}"
+            return f"RND_batch{train_batch_size}{fc}"
         else:
-            return f"Default_batch{train_batch_size}"
+            return f"Default_batch{train_batch_size}{fc}"
 
 
     checkpoint_config = CheckpointConfig(
@@ -447,9 +440,9 @@ if __name__ == "__main__":
     # Run training with Ray Tune
     trail = tune.run(
         "IMPALA",  # Specify the RLlib algorithm
-        config=tune.grid_search(create_grid_search_configs(config.to_dict(), args.batch_size)),
+        config=tune.grid_search(create_grid_search_configs(config.to_dict())),
         stop={
-            "timesteps_total": 10_000_000,  # Stop after 10 million timesteps
+            "timesteps_total": 5_000_000,  # Stop after 10 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs
