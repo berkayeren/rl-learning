@@ -177,7 +177,7 @@ def get_trainer_config(
             .rollouts(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
-                rollout_fragment_length=128,
+                rollout_fragment_length=args.batch_size,
                 batch_mode="truncate_episodes"
             )
             .evaluation(
@@ -191,16 +191,16 @@ def get_trainer_config(
             .training(
                 model={
                     "conv_filters": None,  # Remove convolutional layers
-                    "fcnet_hiddens": [1024, 512],  # Reduced for flattened input
+                    "fcnet_hiddens": [256, 128],  # Reduced for flattened input
                     "fcnet_activation": "relu",
                     "use_lstm": False,
-                    "lstm_cell_size": 1024,  # Reduced LSTM size
+                    # "lstm_cell_size": 1024,  # Reduced LSTM size
                     "max_seq_len": max_seq_len,
-                    "lstm_use_prev_action": True,
-                    "lstm_use_prev_reward": True,
+                    # "lstm_use_prev_action": True,
+                    # "lstm_use_prev_reward": True,
                     "vf_share_layers": False,
-                    "post_fcnet_hiddens": [1024, 1024],  # Reduced post-LSTM layer
-                    "post_fcnet_activation": "relu",
+                    # "post_fcnet_hiddens": [1024, 1024],  # Reduced post-LSTM layer
+                    # "post_fcnet_activation": "relu",
                 },
                 # Training parameters remain the same as they're not dependent on architecture
                 gamma=0.99,
@@ -399,6 +399,43 @@ if __name__ == "__main__":
         return all_configs
 
 
+    def load_grid_search_configs_from_yaml(yaml_path: str, base_config: dict):
+        import yaml
+        import copy
+        """Loads base config + variations from a YAML file,
+        creates fully merged configs, and returns as a list of dicts.
+        """
+        with open(yaml_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        if base_config is None:
+            # Base config shared by all variations
+            base_config = data["base_config"]
+
+        all_configs = []
+
+        # For each variation, create a deep copy of the base and override
+        for var in data.get("variations", []):
+            config_copy = copy.deepcopy(base_config)
+
+            # Override fields from the variation
+            for key, value in var.items():
+                if key == "name":
+                    # Store the variation's 'name' somewhere if needed
+                    config_copy["variation_name"] = value
+                else:
+                    # If it's a nested dict (like env_config or model),
+                    # we want to merge that dict into base_config’s dict.
+                    if isinstance(value, dict) and isinstance(config_copy.get(key), dict):
+                        config_copy[key].update(value)
+                    else:
+                        config_copy[key] = value
+
+            all_configs.append(config_copy)
+
+        return all_configs
+
+
     def custom_trial_name(trial):
         """
         Creates a custom trial name based on the configuration.
@@ -416,33 +453,38 @@ if __name__ == "__main__":
         enable_rnd = env_config.get("enable_rnd", False)
         train_batch_size = trial.config.get("train_batch_size", "unknown")
         fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
+        grad_clip = trial.config.get("grad_clip", "unknown")
 
         if enable_dowham_reward_v1:
-            return f"DoWhaMV1_batch{train_batch_size}{fc}"
+            return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}{fc}"
+            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_count_based:
-            return f"CountBased_batch{train_batch_size}{fc}"
+            return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
-            return f"RND_batch{train_batch_size}{fc}"
+            return f"RND_batch{train_batch_size}{fc}{grad_clip}"
         else:
-            return f"Default_batch{train_batch_size}{fc}"
+            return f"Default_batch{train_batch_size}{fc}{grad_clip}"
 
 
     checkpoint_config = CheckpointConfig(
         num_to_keep=5,
-        checkpoint_frequency=100,
+        checkpoint_frequency=10,
         checkpoint_at_end=True,
-        checkpoint_score_attribute="episode_reward_mean",
-        checkpoint_score_order="max"
+        checkpoint_score_attribute="episode_len_mean",
+        checkpoint_score_order="min"
     )
+
+    # Load and prepare your variations
+    yaml_path = "experiments.yaml"  # path to the YAML file above
+    all_configs = load_grid_search_configs_from_yaml(yaml_path, config.to_dict())
 
     # Run training with Ray Tune
     trail = tune.run(
         "IMPALA",  # Specify the RLlib algorithm
-        config=tune.grid_search(create_grid_search_configs(config.to_dict())),
+        config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 5_000_000,  # Stop after 10 million timesteps
+            "timesteps_total": 10_000_000,  # Stop after 10 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs

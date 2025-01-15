@@ -1,0 +1,93 @@
+base_config:
+  # Anything here is shared across *all* variations,
+  # unless it's overridden below.
+  env_config:
+    enable_dowham_reward_v1: false
+    enable_dowham_reward_v2: false
+    enable_count_based: false
+    enable_rnd: false
+  model:
+    fcnet_activation: relu
+    post_fcnet_activation: relu
+    fcnet_hiddens: [ 256, 256 ]
+  train_batch_size: 256
+  rollout_fragment_length: 256
+
+variations:
+  # -----------------------------------------------------
+  # DoWhaM v1 (enable_dowham_reward_v1 = true)
+  # -----------------------------------------------------
+  - name: DoWhaM_v1_batch32
+    env_config:
+      enable_dowham_reward_v1: true
+      enable_dowham_reward_v2: false
+    model:
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 32
+    rollout_fragment_length: 32
+
+  # -----------------------------------------------------
+  # DoWhaM v2 (enable_dowham_reward_v2 = true)
+  # -----------------------------------------------------
+  - name: DoWhaM_v2_batch32
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 32
+    rollout_fragment_length: 32
+
+  - name: DoWhaM_v2_batch64
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 64
+    rollout_fragment_length: 64
+
+  - name: DoWhaM_v2_batch128
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 128
+    rollout_fragment_length: 128
+
+  # -----------------------------------------------------
+  # RND
+  # -----------------------------------------------------
+  - name: RND
+    env_config:
+      enable_rnd: true
+      enable_count_based: false
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: false
+
+  # -----------------------------------------------------
+  # CountBased
+  # -----------------------------------------------------
+  - name: CountBased
+    env_config:
+      enable_count_based: true
+      enable_rnd: false
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: false
+
+  # -----------------------------------------------------
+  # Default (no intrinsic rewards)
+  # -----------------------------------------------------
+  - name: Default
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: false
+      enable_count_based: false
+      enable_rnd: false

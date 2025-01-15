@@ -13,7 +13,7 @@ from callbacks.minigrid.callback import MinigridCallback
 from callbacks.pacman.callback import PacmanCallback
 from custom_train import get_trainer_config
 from environments.minigrid_env import CustomPlaygroundEnv
-from environments.minigrid_wrapper import PositionWrapper
+from environments.minigrid_wrapper import FlattenedPositionWrapper
 
 # Initialize Ray
 ray.init(ignore_reinit_error=True, _metrics_export_port=8080)
@@ -56,12 +56,13 @@ if __name__ == "__main__":
 
     # Register the custom environment
     register_env("MiniGrid-CustomPlayground-v0",
-                 lambda config: PositionWrapper(
-                     CustomPlaygroundEnv(render_mode=render_mode, enable_dowham_reward=args.enable_dowham_reward)))
+                 lambda config: FlattenedPositionWrapper(
+                     CustomPlaygroundEnv(render_mode=render_mode, enable_dowham_reward_v2=args.enable_dowham_reward)))
 
     register(
         id="MiniGrid-CustomPlayground-v0",
-        entry_point=lambda: PositionWrapper(CustomPlaygroundEnv(render_mode="human", enable_dowham_reward=True))
+        entry_point=lambda: FlattenedPositionWrapper(
+            CustomPlaygroundEnv(render_mode="human", enable_dowham_reward_v2=True))
     )
 
     # Get total CPUs
@@ -102,9 +103,10 @@ if __name__ == "__main__":
     # Join the current directory with the relative path
     checkpoint_dir = os.path.join(current_dir, relative_path)
     trainer = config.build()
-    if args.checkpoint:
+    if not args.checkpoint:
         try:
-            trainer.restore(f'{checkpoint_dir}/{args.checkpoint}')
+            trainer.restore(
+                f'/Users/berkayeren/ray_results/IMPALA_2025-01-15_21-59-08/DoWhaMV2_batch32[256, 128]42_6db2/checkpoint_000001')
         except ValueError:
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
@@ -127,11 +129,6 @@ if __name__ == "__main__":
             action = trainer.compute_single_action(observation=observation, prev_action=action, prev_reward=reward)
             # Take the action in the environment
             observation, reward, done, info, _ = env.step(action)
-            print(env.agent_pos)
-            visited_states.setdefault(env.agent_pos, 0)
-            visited_states[env.agent_pos] += 1
-            if env.step_count >= 100000:
-                done = True
             if render_mode == 'human':
                 env.render()
 

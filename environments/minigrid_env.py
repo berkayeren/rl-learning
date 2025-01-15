@@ -214,7 +214,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.action_count[action] += 1
         current_state = self.hash()
         current_obs = self.gen_obs()
-        obs, reward, done, info, _ = super().step(action)
+        obs, reward, terminated, truncated, _ = super().step(action)
 
         next_state = self.hash()
         next_obs = self.gen_obs()
@@ -243,19 +243,13 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         self.intrinsic_reward = self.normalizer.normalize(self.intrinsic_reward)
         reward += self.intrinsic_reward
-        self.done = done
+        self.total_episode_reward += reward
+        self.done = terminated
 
-        if done:
-            total_size = self.width * self.height
-            # Calculate the number of unique states visited by the agent
-            unique_states_visited = np.count_nonzero(self.states)
+        if terminated:
+            reward += self.total_episode_reward // 2
 
-            # Calculate the percentage of the environment the agent has visited
-            percentage_visited = (unique_states_visited / total_size) * 100
-
-            reward += max(10, int((percentage_visited * self.total_episode_reward) / 100))
-
-        return obs, reward, done, info, {}
+        return obs, reward, terminated, truncated, {}
 
     def reset(self, **kwargs):
         self.episode_history = []
