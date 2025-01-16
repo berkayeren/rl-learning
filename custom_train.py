@@ -202,12 +202,12 @@ def get_trainer_config(
                     # "post_fcnet_hiddens": [1024, 1024],  # Reduced post-LSTM layer
                     # "post_fcnet_activation": "relu",
                 },
-                # Training parameters remain the same as they're not dependent on architecture
+                optimizer={"type": "RMSProp"},
                 gamma=0.99,
                 lr=1e-5,
                 entropy_coeff=0.001,
-                vf_loss_coeff=40,
-                grad_clip=42,
+                vf_loss_coeff=0.5,
+                grad_clip=40,
                 train_batch_size=args.batch_size,
                 replay_proportion=0.4,
                 replay_buffer_num_slots=100,

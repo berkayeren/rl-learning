@@ -55,7 +55,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         return super().__str__()
 
-    def __init__(self, intrinsic_reward_scaling=1, eta=40, H=1, tau=0.5, size=11, render_mode=None, **kwargs):
+    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, size=11, render_mode=None, **kwargs):
         self.consider_position = kwargs.pop('consider_position', True)
         self.agent_pos = (1, 1)
         self.goal_pos = (16, 16)
@@ -237,7 +237,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         if self.enable_rnd:
             flat_obs = self.flatten_observation(next_obs)
             self.intrinsic_reward = self.rnd.compute_intrinsic_reward(flat_obs)
-
+            self.intrinsic_reward = self.intrinsic_reward_scaling * self.intrinsic_reward
             # Update predictor network
             self.rnd.update_predictor([flat_obs])
 
@@ -461,7 +461,7 @@ class CustomPlaygroundEnvObstructed(ObstructedMaze_1Dlhb):
         if self.enable_rnd:
             flat_obs = self.flatten_observation(next_obs)
             self.intrinsic_reward = self.rnd.compute_intrinsic_reward(flat_obs)
-
+            self.intrinsic_reward = self.intrinsic_reward_scaling * self.intrinsic_reward
             # Update predictor network
             self.rnd.update_predictor([flat_obs])
 
