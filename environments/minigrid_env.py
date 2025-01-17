@@ -247,7 +247,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.done = terminated
 
         if terminated:
-            reward += self.total_episode_reward // 2
+            reward += 100
 
         return obs, reward, terminated, truncated, {}
 

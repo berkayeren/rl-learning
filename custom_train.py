@@ -202,6 +202,7 @@ def get_trainer_config(
                     # "post_fcnet_hiddens": [1024, 1024],  # Reduced post-LSTM layer
                     # "post_fcnet_activation": "relu",
                 },
+                opt_type="rmsprop",
                 optimizer={"type": "RMSProp"},
                 gamma=0.99,
                 lr=1e-5,
@@ -484,11 +485,11 @@ if __name__ == "__main__":
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 10_000_000,  # Stop after 10 million timesteps
+            "timesteps_total": 20_000_000,  # Stop after 10 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs
-        num_samples=1,  # Only one trial
+        num_samples=3,  # Only one trial
         trial_name_creator=custom_trial_name,  # Custom trial name
         trial_dirname_creator=custom_trial_name,  # Custom trial name
         log_to_file=True,
