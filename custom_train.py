@@ -450,6 +450,7 @@ if __name__ == "__main__":
         env_config = trial.config.get("env_config", {})
         enable_dowham_reward_v1 = env_config.get("enable_dowham_reward_v1", False)
         enable_dowham_reward_v2 = env_config.get("enable_dowham_reward_v2", False)
+        randomize_state_transition = env_config.get("randomize_state_transition", False)
         enable_count_based = env_config.get("enable_count_based", False)
         enable_rnd = env_config.get("enable_rnd", False)
         train_batch_size = trial.config.get("train_batch_size", "unknown")
@@ -459,7 +460,7 @@ if __name__ == "__main__":
         if enable_dowham_reward_v1:
             return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}"
+            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}Transition{randomize_state_transition}"
         elif enable_count_based:
             return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
@@ -489,7 +490,7 @@ if __name__ == "__main__":
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs
-        num_samples=3,  # Only one trial
+        num_samples=1,  # Only one trial
         trial_name_creator=custom_trial_name,  # Custom trial name
         trial_dirname_creator=custom_trial_name,  # Custom trial name
         log_to_file=True,

@@ -1,10 +1,11 @@
 import collections
+import random
 
 import numpy as np
 
 
 class DoWhaMIntrinsicRewardV2:
-    def __init__(self, eta, H, tau):
+    def __init__(self, eta, H, tau, randomize_state_transition=False):
         self.eta = eta
         self.H = H
         self.tau = tau
@@ -12,6 +13,7 @@ class DoWhaMIntrinsicRewardV2:
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
         self.recent_transitions = collections.deque(maxlen=200)  # Track recent state transitions
+        self.randomize_state_transition = randomize_state_transition
 
     def update_usage(self, obs, action):
         if obs not in self.usage_counts:
@@ -28,7 +30,10 @@ class DoWhaMIntrinsicRewardV2:
 
         transition = (obs, action, next_obs)
 
-        is_novel_state = transition not in self.recent_transitions
+        if self.randomize_state_transition:
+            is_novel_state = random.choice([True, transition not in self.recent_transitions]),
+        else:
+            is_novel_state = transition not in self.recent_transitions
 
         if state_changed and is_novel_state:
             self.effectiveness_counts[obs][action] += 1
