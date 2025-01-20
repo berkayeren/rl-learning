@@ -12,7 +12,7 @@ class DoWhaMIntrinsicRewardV2:
         self.usage_counts = {}
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
-        self.recent_transitions = collections.deque(maxlen=200)  # Track recent state transitions
+        self.recent_transitions = collections.deque(maxlen=1000)  # Track recent state transitions
         self.randomize_state_transition = randomize_state_transition
 
     def update_usage(self, obs, action):

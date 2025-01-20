@@ -215,7 +215,7 @@ def get_trainer_config(
             ).exploration(
                 exploration_config={
                     "type": "EpsilonGreedy",  # Default exploration strategy
-                    "epsilon_timesteps": 100000,  # Decay epsilon over these steps (if applicable)
+                    "epsilon_timesteps": 500000,  # Decay epsilon over these steps (if applicable)
                     "initial_epsilon": 0.8,  # Initial epsilon value
                     "final_epsilon": 0.1  # Final epsilon value
                 }
