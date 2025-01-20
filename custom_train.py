@@ -212,6 +212,13 @@ def get_trainer_config(
                 train_batch_size=args.batch_size,
                 replay_proportion=0.4,
                 replay_buffer_num_slots=100,
+            ).exploration(
+                exploration_config={
+                    "type": "EpsilonGreedy",  # Default exploration strategy
+                    "epsilon_timesteps": 100000,  # Decay epsilon over these steps (if applicable)
+                    "initial_epsilon": 0.8,  # Initial epsilon value
+                    "final_epsilon": 0.1  # Final epsilon value
+                }
             )
             .resources(
                 num_gpus=args.num_gpus,

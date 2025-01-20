@@ -114,14 +114,14 @@ variations:
 #    train_batch_size: 32
 #    rollout_fragment_length: 32
 #
-#  # -----------------------------------------------------
-#  # Default (no intrinsic rewards)
-#  # -----------------------------------------------------
-#  - name: Default
-#    env_config:
-#      enable_dowham_reward_v1: false
-#      enable_dowham_reward_v2: false
-#      enable_count_based: false
-#      enable_rnd: false
-#    train_batch_size: 32
-#    rollout_fragment_length: 32
+  # -----------------------------------------------------
+  # Default (no intrinsic rewards)
+  # -----------------------------------------------------
+  - name: Default
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: false
+      enable_count_based: false
+      enable_rnd: false
+    train_batch_size: 32
+    rollout_fragment_length: 32
