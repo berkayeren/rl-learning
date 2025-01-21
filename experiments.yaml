@@ -39,20 +39,9 @@ variations:
       fcnet_activation: tanh
       post_fcnet_activation: tanh
       fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 32
-    rollout_fragment_length: 32
-
-  - name: DoWhaM_v2_batch32Random
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 600
-    model:
-      fcnet_activation: tanh
-      post_fcnet_activation: tanh
-      fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 64
-    rollout_fragment_length: 64
+    train_batch_size: 128
+    rollout_fragment_length: 128
+    vf_loss_coeff: 0.1
 
   - name: DoWhaM_v2_batch32Random
     env_config:
@@ -66,7 +55,7 @@ variations:
       fcnet_hiddens: [ 256, 128 ]
     train_batch_size: 128
     rollout_fragment_length: 128
-
+    vf_loss_coeff: 0.2
 
   - name: DoWhaM_v2_batch32Random
     env_config:
@@ -78,8 +67,37 @@ variations:
       fcnet_activation: tanh
       post_fcnet_activation: tanh
       fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 256
-    rollout_fragment_length: 256
+    train_batch_size: 128
+    rollout_fragment_length: 128
+    vf_loss_coeff: 0.5
+
+  - name: DoWhaM_v2_batch32Random
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 600
+
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 128
+    rollout_fragment_length: 128
+    vf_loss_coeff: 1.0
+
+  - name: DoWhaM_v2_batch32Random
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 600
+
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 128
+    rollout_fragment_length: 128
+    vf_loss_coeff: 2.0
 
   #  - name: DoWhaM_v2_batch32C50
   #    env_config:
