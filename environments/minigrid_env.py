@@ -69,6 +69,8 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.randomize_state_transition = kwargs.pop('randomize_state_transition', False)
         self.enable_count_based = kwargs.pop('enable_count_based', False)
         self.enable_rnd = kwargs.pop('enable_rnd', False)
+        self.max_steps = kwargs.pop('max_steps', 200)
+
         self.action_count = {
             0: 0,
             1: 0,
@@ -86,12 +88,12 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.maxRoomSize = kwargs.pop('maxRoomSize', 10)
         self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
         self.env_name = kwargs.pop('env_name', "CustomPlaygroundEnv-v0")
-        self.spec = EnvSpec(self.env_name, max_episode_steps=1000)
+        self.spec = EnvSpec(self.env_name, max_episode_steps=self.max_steps)
         self.size = 19
         mission_space = MissionSpace(mission_func=self._gen_mission)
 
         super().__init__(
-            max_steps=1000, render_mode=render_mode,
+            max_steps=self.max_steps, render_mode=render_mode,
             mission_space=mission_space,
             width=self.size,
             height=self.size,
@@ -104,7 +106,6 @@ class CustomPlaygroundEnv(MiniGridEnv):
             'position': spaces.Box(low=0, high=19, shape=(2,), dtype=np.int64)
         })
 
-        self.max_steps = 1000
         self.success_history = collections.deque(maxlen=100)
 
         if self.enable_dowham_reward_v1:
@@ -244,11 +245,12 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         self.intrinsic_reward = self.normalizer.normalize(self.intrinsic_reward)
         reward += self.intrinsic_reward
-        self.total_episode_reward += reward
         self.done = terminated
 
         if terminated:
             reward += 100
+
+        self.total_episode_reward += reward
 
         return obs, reward, terminated, truncated, {}
 

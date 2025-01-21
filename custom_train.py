@@ -215,9 +215,17 @@ def get_trainer_config(
             ).exploration(
                 exploration_config={
                     "type": "EpsilonGreedy",  # Default exploration strategy
-                    "epsilon_timesteps": 500000,  # Decay epsilon over these steps (if applicable)
-                    "initial_epsilon": 0.8,  # Initial epsilon value
-                    "final_epsilon": 0.1  # Final epsilon value
+                    "epsilon_schedule": {
+                        "type": "PiecewiseSchedule",
+                        "endpoints": [
+                            (0, 0.8),  # Start at epsilon = 0.8
+                            (50000, 0.6),  # Decay to epsilon = 0.6 at 50,000 timesteps
+                            (100000, 0.4),  # Decay to epsilon = 0.4 at 100,000 timesteps
+                            (250000, 0.2),  # Decay to epsilon = 0.2 at 250,000 timesteps
+                            (500000, 0.1)  # Decay to epsilon = 0.1 at 500,000 timesteps
+                        ],
+                        "outside_value": 0.1  # Use epsilon = 0.1 after 500,000 timesteps
+                    }
                 }
             )
             .resources(
@@ -458,6 +466,7 @@ if __name__ == "__main__":
         enable_dowham_reward_v1 = env_config.get("enable_dowham_reward_v1", False)
         enable_dowham_reward_v2 = env_config.get("enable_dowham_reward_v2", False)
         randomize_state_transition = env_config.get("randomize_state_transition", False)
+        max_steps = env_config.get("max_steps", False)
         enable_count_based = env_config.get("enable_count_based", False)
         enable_rnd = env_config.get("enable_rnd", False)
         train_batch_size = trial.config.get("train_batch_size", "unknown")
@@ -467,7 +476,7 @@ if __name__ == "__main__":
         if enable_dowham_reward_v1:
             return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}Transition{randomize_state_transition}"
+            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}Transition{randomize_state_transition}{max_steps}"
         elif enable_count_based:
             return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
@@ -493,7 +502,7 @@ if __name__ == "__main__":
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 20_000_000,  # Stop after 10 million timesteps
+            "timesteps_total": 5_000_000,  # Stop after 5 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs

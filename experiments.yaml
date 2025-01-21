@@ -33,7 +33,7 @@ variations:
     env_config:
       enable_dowham_reward_v1: false
       enable_dowham_reward_v2: true
-      randomize_state_transition: True  # Enable randomization of state transitions
+      max_steps: 576
 
     model:
       fcnet_activation: tanh
@@ -46,8 +46,7 @@ variations:
     env_config:
       enable_dowham_reward_v1: false
       enable_dowham_reward_v2: true
-      randomize_state_transition: false  # Disable randomization of state transitions
-
+      max_steps: 300
     model:
       fcnet_activation: tanh
       post_fcnet_activation: tanh
@@ -55,65 +54,101 @@ variations:
     train_batch_size: 32
     rollout_fragment_length: 32
 
-#  - name: DoWhaM_v2_batch32C50
-#    env_config:
-#      enable_dowham_reward_v1: false
-#      enable_dowham_reward_v2: true
-#    model:
-#      fcnet_activation: tanh
-#      post_fcnet_activation: tanh
-#      fcnet_hiddens: [ 256, 128 ]
-#    train_batch_size: 32
-#    rollout_fragment_length: 32
-#    grad_clip: 50.0
-#
-#  - name: DoWhaM_v2_batch32
-#    env_config:
-#      enable_dowham_reward_v1: false
-#      enable_dowham_reward_v2: true
-#    model:
-#      fcnet_activation: tanh
-#      post_fcnet_activation: tanh
-#      fcnet_hiddens: [ 1024, 512, 128, 64 ]
-#    train_batch_size: 32
-#    rollout_fragment_length: 32
-#
-#  - name: DoWhaM_v2_batch32C50
-#    env_config:
-#      enable_dowham_reward_v1: false
-#      enable_dowham_reward_v2: true
-#    model:
-#      fcnet_activation: tanh
-#      post_fcnet_activation: tanh
-#      fcnet_hiddens: [ 1024, 512, 128, 64 ]
-#    train_batch_size: 32
-#    rollout_fragment_length: 32
-#    grad_clip: 50.0
-#
-#  # -----------------------------------------------------
-#  # RND
-#  # -----------------------------------------------------
-#  - name: RND
-#    env_config:
-#      enable_rnd: true
-#      enable_count_based: false
-#      enable_dowham_reward_v1: false
-#      enable_dowham_reward_v2: false
-#    train_batch_size: 32
-#    rollout_fragment_length: 32
-#
-#  # -----------------------------------------------------
-#  # CountBased
-#  # -----------------------------------------------------
-#  - name: CountBased
-#    env_config:
-#      enable_count_based: true
-#      enable_rnd: false
-#      enable_dowham_reward_v1: false
-#      enable_dowham_reward_v2: false
-#    train_batch_size: 32
-#    rollout_fragment_length: 32
-#
+  - name: DoWhaM_v2_batch32
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 400
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 32
+    rollout_fragment_length: 32
+
+  - name: DoWhaM_v2_batch32
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 500
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 32
+    rollout_fragment_length: 32
+
+  - name: DoWhaM_v2_batch32
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 600
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 32
+    rollout_fragment_length: 32
+
+  #  - name: DoWhaM_v2_batch32C50
+  #    env_config:
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: true
+  #    model:
+  #      fcnet_activation: tanh
+  #      post_fcnet_activation: tanh
+  #      fcnet_hiddens: [ 256, 128 ]
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #    grad_clip: 50.0
+  #
+  #  - name: DoWhaM_v2_batch32
+  #    env_config:
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: true
+  #    model:
+  #      fcnet_activation: tanh
+  #      post_fcnet_activation: tanh
+  #      fcnet_hiddens: [ 1024, 512, 128, 64 ]
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #
+  #  - name: DoWhaM_v2_batch32C50
+  #    env_config:
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: true
+  #    model:
+  #      fcnet_activation: tanh
+  #      post_fcnet_activation: tanh
+  #      fcnet_hiddens: [ 1024, 512, 128, 64 ]
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #    grad_clip: 50.0
+  #
+  #  # -----------------------------------------------------
+  #  # RND
+  #  # -----------------------------------------------------
+  #  - name: RND
+  #    env_config:
+  #      enable_rnd: true
+  #      enable_count_based: false
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: false
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #
+  #  # -----------------------------------------------------
+  #  # CountBased
+  #  # -----------------------------------------------------
+  #  - name: CountBased
+  #    env_config:
+  #      enable_count_based: true
+  #      enable_rnd: false
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: false
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #
   # -----------------------------------------------------
   # Default (no intrinsic rewards)
   # -----------------------------------------------------
