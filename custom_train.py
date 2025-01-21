@@ -233,7 +233,7 @@ def get_trainer_config(
                 }
             )
             .resources(
-                num_gpus=args.num_gpus,
+                num_gpus=args.num_gpus / args.num_rollout_workers,
                 num_cpus_per_worker=1,
                 num_learner_workers=1,
                 num_cpus_for_local_worker=1,
