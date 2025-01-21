@@ -205,11 +205,6 @@ def get_trainer_config(
                 opt_type="rmsprop",
                 optimizer={"type": "RMSProp"},
                 gamma=0.99,
-                lr_schedule=[
-                    [0, 1e-4],  # Start with a slightly higher learning rate
-                    [500000, 5e-5],  # Gradually reduce it
-                    [1_000_000, 1e-5]
-                ],
                 lr=1e-5,
                 entropy_coeff=0.001,
                 vf_loss_coeff=0.5,
@@ -217,18 +212,18 @@ def get_trainer_config(
                 train_batch_size=args.batch_size,
                 replay_proportion=0.4,
                 replay_buffer_num_slots=100,
-            ).exploration(
+            )
+            .exploration(
                 exploration_config={
                     "type": "EpsilonGreedy",  # Default exploration strategy
                     "epsilon_schedule": {
                         "type": "PiecewiseSchedule",
                         "endpoints": [
-                            (0, 0.8),  # Start at 0.8
-                            (500000, 0.6),  # Slower decay
-                            (1_000_000, 0.4),  # Maintain moderate exploration
-                            (1_500_000, 0.1)  # Shift to exploitation later
+                            (0, 0.0),  # Start with no exploration
+                            (1_000_000, 0.2),  # Gradually introduce exploration
+                            (5_000_000, 0.5)  # Increase exploration to moderate levels
                         ],
-                        "outside_value": 0.1  # Use epsilon = 0.1 after 500,000 timesteps
+                        "outside_value": 0.1
                     }
                 }
             )
@@ -477,11 +472,12 @@ if __name__ == "__main__":
         fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
         grad_clip = trial.config.get("grad_clip", "unknown")
         vf_loss_coeff = trial.config.get("vf_loss_coeff", "unknown")
+        batch_mode = trial.config.get("batch_mode", "unknown")
 
         if enable_dowham_reward_v1:
             return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}Transition{randomize_state_transition}{max_steps}vf{vf_loss_coeff}"
+            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}Transition{randomize_state_transition}{max_steps}vf{vf_loss_coeff}{batch_mode}"
         elif enable_count_based:
             return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
@@ -507,7 +503,7 @@ if __name__ == "__main__":
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 2_000_000,  # Stop after 5 million timesteps
+            "timesteps_total": 10_000_000,  # Stop after 5 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs
