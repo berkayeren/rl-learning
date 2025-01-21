@@ -205,6 +205,13 @@ def get_trainer_config(
                 opt_type="rmsprop",
                 optimizer={"type": "RMSProp"},
                 gamma=0.99,
+                lr_schedule=[
+                    [0, 1e-4],  # High learning rate during high exploration
+                    [200000, 5e-5],  # Decay learning rate as exploration decreases
+                    [400000, 1e-5],  # Low learning rate during exploitation
+                    [600000, 5e-6],  # Further decay for fine-tuning
+                    [1_000_000, 1e-6]  # Final fine-tuning phase
+                ],
                 lr=1e-5,
                 entropy_coeff=0.001,
                 vf_loss_coeff=0.5,
@@ -218,11 +225,11 @@ def get_trainer_config(
                     "epsilon_schedule": {
                         "type": "PiecewiseSchedule",
                         "endpoints": [
-                            (0, 0.8),  # Start at epsilon = 0.8
-                            (50000, 0.6),  # Decay to epsilon = 0.6 at 50,000 timesteps
-                            (100000, 0.4),  # Decay to epsilon = 0.4 at 100,000 timesteps
-                            (250000, 0.2),  # Decay to epsilon = 0.2 at 250,000 timesteps
-                            (500000, 0.1)  # Decay to epsilon = 0.1 at 500,000 timesteps
+                            (0, 0.8),  # High exploration
+                            (200000, 0.6),  # Moderate exploration
+                            (400000, 0.4),  # Transition to exploitation
+                            (600000, 0.2),  # Low exploration
+                            (1_000_000, 0.1)  # Exploitation phase
                         ],
                         "outside_value": 0.1  # Use epsilon = 0.1 after 500,000 timesteps
                     }
