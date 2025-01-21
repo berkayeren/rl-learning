@@ -33,7 +33,7 @@ variations:
     env_config:
       enable_dowham_reward_v1: false
       enable_dowham_reward_v2: true
-      max_steps: 576
+      max_steps: 600
 
     model:
       fcnet_activation: tanh
@@ -42,43 +42,7 @@ variations:
     train_batch_size: 32
     rollout_fragment_length: 32
 
-  - name: DoWhaM_v2_batch32
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 300
-    model:
-      fcnet_activation: tanh
-      post_fcnet_activation: tanh
-      fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 32
-    rollout_fragment_length: 32
-
-  - name: DoWhaM_v2_batch32
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 400
-    model:
-      fcnet_activation: tanh
-      post_fcnet_activation: tanh
-      fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 32
-    rollout_fragment_length: 32
-
-  - name: DoWhaM_v2_batch32
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 500
-    model:
-      fcnet_activation: tanh
-      post_fcnet_activation: tanh
-      fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 32
-    rollout_fragment_length: 32
-
-  - name: DoWhaM_v2_batch32
+  - name: DoWhaM_v2_batch32Random
     env_config:
       enable_dowham_reward_v1: false
       enable_dowham_reward_v2: true
@@ -87,8 +51,35 @@ variations:
       fcnet_activation: tanh
       post_fcnet_activation: tanh
       fcnet_hiddens: [ 256, 128 ]
-    train_batch_size: 32
-    rollout_fragment_length: 32
+    train_batch_size: 64
+    rollout_fragment_length: 64
+
+  - name: DoWhaM_v2_batch32Random
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 600
+
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 128
+    rollout_fragment_length: 128
+
+
+  - name: DoWhaM_v2_batch32Random
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 600
+
+    model:
+      fcnet_activation: tanh
+      post_fcnet_activation: tanh
+      fcnet_hiddens: [ 256, 128 ]
+    train_batch_size: 256
+    rollout_fragment_length: 256
 
   #  - name: DoWhaM_v2_batch32C50
   #    env_config:

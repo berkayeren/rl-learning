@@ -509,7 +509,7 @@ if __name__ == "__main__":
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 5_000_000,  # Stop after 5 million timesteps
+            "timesteps_total": 2_000_000,  # Stop after 5 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs

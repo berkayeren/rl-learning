@@ -115,7 +115,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         if self.enable_dowham_reward_v2:
             print("Enabling DoWhaM intrinsic reward with Negative Reward")
-            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta, H, tau, self.randomize_state_transition)
+            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta, H, tau, self.randomize_state_transition, self.max_steps)
             self.intrinsic_reward = 0.0
             self.normalizer = RewardNormalizer(-1, 1)
 
