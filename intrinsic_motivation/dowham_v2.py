@@ -5,14 +5,15 @@ import numpy as np
 
 
 class DoWhaMIntrinsicRewardV2:
-    def __init__(self, eta, H, tau, randomize_state_transition=False, max_steps=200):
+    def __init__(self, eta, H, tau, randomize_state_transition=False, max_steps=200, transition_divisor=1):
         self.eta = eta
         self.H = H
         self.tau = tau
         self.usage_counts = {}
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
-        self.recent_transitions = collections.deque(maxlen=max_steps)  # Track recent state transitions
+        self.recent_transitions = collections.deque(
+            maxlen=max_steps // transition_divisor)  # Track recent state transitions
         self.randomize_state_transition = randomize_state_transition
 
     def update_usage(self, obs, action):

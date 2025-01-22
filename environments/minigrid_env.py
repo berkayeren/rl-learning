@@ -67,6 +67,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
         self.randomize_state_transition = kwargs.pop('randomize_state_transition', False)
+        self.transition_divisor = kwargs.pop('transition_divisor', 1)
         self.enable_count_based = kwargs.pop('enable_count_based', False)
         self.enable_rnd = kwargs.pop('enable_rnd', False)
         self.max_steps = kwargs.pop('max_steps', 200)
@@ -115,7 +116,8 @@ class CustomPlaygroundEnv(MiniGridEnv):
 
         if self.enable_dowham_reward_v2:
             print("Enabling DoWhaM intrinsic reward with Negative Reward")
-            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta, H, tau, self.randomize_state_transition, self.max_steps)
+            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta, H, tau, self.randomize_state_transition, self.max_steps,
+                                                         self.transition_divisor)
             self.intrinsic_reward = 0.0
             self.normalizer = RewardNormalizer(-1, 1)
 
@@ -248,7 +250,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.done = terminated
 
         if terminated:
-            reward += 100
+            reward += 10
 
         self.total_episode_reward += reward
 

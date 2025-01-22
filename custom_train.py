@@ -221,9 +221,9 @@ def get_trainer_config(
                         "endpoints": [
                             (0, 0.0),  # Start with no exploration
                             (1_000_000, 0.2),  # Gradually introduce exploration
-                            (5_000_000, 0.5)  # Increase exploration to moderate levels
+                            (2_000_000, 0.3)  # Increase exploration to moderate levels
                         ],
-                        "outside_value": 0.1
+                        "outside_value": 0.2
                     }
                 }
             )
@@ -473,11 +473,12 @@ if __name__ == "__main__":
         grad_clip = trial.config.get("grad_clip", "unknown")
         vf_loss_coeff = trial.config.get("vf_loss_coeff", "unknown")
         batch_mode = trial.config.get("batch_mode", "unknown")
+        transition_divisor = env_config.get("transition_divisor", "1")
 
         if enable_dowham_reward_v1:
             return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}{fc}{grad_clip}Transition{randomize_state_transition}{max_steps}vf{vf_loss_coeff}{batch_mode}"
+            return f"DoWhaMV2_batch{train_batch_size}Transition{randomize_state_transition}{max_steps}vf{vf_loss_coeff}{batch_mode}{transition_divisor}"
         elif enable_count_based:
             return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
