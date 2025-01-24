@@ -9,7 +9,7 @@ from minigrid.core.constants import OBJECT_TO_IDX, COLOR_TO_IDX
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Goal
-from minigrid.envs import ObstructedMaze_1Dlhb
+from minigrid.envs import ObstructedMaze_1Dlhb, KeyCorridorEnv
 from minigrid.minigrid_env import MiniGridEnv
 
 from intrinsic_motivation.count_based import CountExploration
@@ -158,17 +158,13 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.agent_dir = random.randint(0, 3)
         self.mission = "traverse the rooms to get to the goal"
 
-    def observations_changed(self, current_obs, next_obs):
+    def observations_changed(self, current_obs, next_obs, current_state, next_state):
         # Compare images
-        images_equal = current_obs.get('position') == next_obs.get('position')
-        directions_equal = True
-        if self.consider_position:
-            # Compare directions
-            directions_equal = current_obs['direction'] == next_obs['direction']
+        positions_equal = current_obs.get('position') != next_obs.get('position')
 
-        # You can include mission if it changes over time
-        # For MiniGrid, the mission usually remains the same
-        return not (images_equal and directions_equal)
+        state_change = current_state != next_state
+
+        return positions_equal or state_change
 
     def hash(self, size=32):
         """Compute a hash that uniquely identifies the full state of the environment.
@@ -193,7 +189,7 @@ class CustomPlaygroundEnv(MiniGridEnv):
         # Get the full grid representation
         full_grid = self.grid.encode()  # Encodes the entire grid into a NumPy array
         full_grid[self.agent_pos[0]][self.agent_pos[1]] = np.array(
-            [OBJECT_TO_IDX["agent"], COLOR_TO_IDX["red"], self.agent_dir]
+            [OBJECT_TO_IDX["agent"], COLOR_TO_IDX["red"], 0]
         )
         return full_grid
 
@@ -218,20 +214,20 @@ class CustomPlaygroundEnv(MiniGridEnv):
         self.action_count[action] += 1
         current_state = self.hash()
         current_obs = self.gen_obs()
+        prev_pos = (self.agent_pos, self.agent_dir)
         obs, reward, terminated, truncated, _ = super().step(action)
-
+        next_pos = (self.agent_pos, self.agent_dir)
         next_state = self.hash()
         next_obs = self.gen_obs()
         self.intrinsic_reward = 0.0
 
         if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
-            self.dowham_reward.update_state_visits(current_state, next_state)
-            state_changed = self.observations_changed(current_obs, next_obs)
-            self.dowham_reward.update_usage(current_state, action)
-            self.dowham_reward.update_effectiveness(current_state, action, next_state, state_changed)
-            intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_state, action, next_state,
-                                                                             state_changed)
-            self.intrinsic_reward = self.intrinsic_reward_scaling * intrinsic_reward
+            self.dowham_reward.update_state_visits(prev_pos, next_pos)
+            state_changed = self.observations_changed(current_obs, next_obs, current_state, next_state)
+            self.dowham_reward.update_usage(prev_pos, action)
+            self.dowham_reward.update_effectiveness(prev_pos, action, next_pos, state_changed)
+            self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(prev_pos, action, next_pos,
+                                                                                  state_changed)
 
         if self.enable_count_based:
             self.intrinsic_reward = self.count_exploration.update(current_state, action, reward, next_state)
@@ -245,12 +241,11 @@ class CustomPlaygroundEnv(MiniGridEnv):
             # Update predictor network
             self.rnd.update_predictor([flat_obs])
 
-        self.intrinsic_reward = self.normalizer.normalize(self.intrinsic_reward)
         reward += self.intrinsic_reward
         self.done = terminated
 
         if terminated:
-            reward += 10
+            reward += 25
 
         self.total_episode_reward += reward
 
@@ -507,6 +502,223 @@ class CustomPlaygroundEnvObstructed(ObstructedMaze_1Dlhb):
         self.success_rate = sum(self.success_history) / len(self.success_history)
         self.agent_pos = (1, 1)
         self.agent_dir = 0
+        obs, _ = super().reset(**kwargs)
+
+        # Update observation normalization if RND is active
+        if self.enable_rnd:
+            self.rnd.update_obs_normalizer(self.flatten_observation(self.gen_obs()))
+
+        self.states = np.full((self.width, self.height), 0)
+        self.done = False
+        self.total_episode_reward = 0.0
+        return obs, {}
+
+
+class CustomPlaygroundEnvKeyCorridor(KeyCorridorEnv):
+
+    def __str__(self):
+        if self.agent_pos is None:
+            self.reset()
+
+        return super().__str__()
+
+    def __init__(self, intrinsic_reward_scaling=0.05, eta=40, H=1, tau=0.5, render_mode=None, **kwargs):
+        self.consider_position = kwargs.pop('consider_position', False)
+        self.agent_pos = (1, 1)
+        self.goal_pos = (16, 16)
+        self.agent_dir = 0
+        self.success_rate: float = 0.0
+        self.done = False
+        self.intrinsic_reward_scaling = intrinsic_reward_scaling
+        self.normalizer = RewardNormalizer(0, 1)
+        self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
+        self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
+        self.randomize_state_transition = kwargs.pop('randomize_state_transition', False)
+        self.transition_divisor = kwargs.pop('transition_divisor', 1)
+        self.enable_count_based = kwargs.pop('enable_count_based', False)
+        self.enable_rnd = kwargs.pop('enable_rnd', False)
+        self.max_steps = kwargs.pop('max_steps', 200)
+
+        self.action_count = {
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 0,
+            6: 0,
+        }
+
+        self.episode_history = []
+
+        self.minNumRooms = kwargs.pop('minNumRooms', 4)
+        self.maxNumRooms = kwargs.pop('maxNumRooms', 4)
+        self.maxRoomSize = kwargs.pop('maxRoomSize', 10)
+        self.max_possible_rooms = kwargs.pop('max_possible_rooms', 6)
+        self.env_name = kwargs.pop('env_name', "CustomPlaygroundEnv-v0")
+        self.spec = EnvSpec(self.env_name, max_episode_steps=self.max_steps)
+
+        super().__init__(
+            max_steps=self.max_steps, render_mode=render_mode,
+            num_rows=1,
+            room_size=4,
+            **kwargs
+        )
+
+        self.observation_space = spaces.Dict({
+            'direction': spaces.Discrete(4),
+            'image': spaces.Box(0, 255, (np.prod((self.height, self.width, 3)),), dtype=np.uint8),
+            'position': spaces.Box(low=0, high=19, shape=(2,), dtype=np.int64)
+        })
+
+        self.success_history = collections.deque(maxlen=100)
+
+        if self.enable_dowham_reward_v1:
+            print("Enabling DoWhaM intrinsic reward v1")
+            self.dowham_reward = DoWhaMIntrinsicRewardV1(eta, H, tau)
+            self.intrinsic_reward = 0.0
+
+        if self.enable_dowham_reward_v2:
+            print("Enabling DoWhaM intrinsic reward with Negative Reward")
+            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta, H, tau, self.randomize_state_transition, self.max_steps,
+                                                         self.transition_divisor)
+            self.intrinsic_reward = 0.0
+            self.normalizer = RewardNormalizer(-1, 1)
+
+        if self.enable_count_based:
+            print("Enabling count-based exploration")
+            self.count_exploration = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
+            self.count_bonus = 0.0
+
+        if self.enable_rnd:
+            print("Enabling Random Network Distillation")
+            self.rnd = RNDModule(embed_dim=512,
+                                 reward_scale=10 ** 4)
+
+        self.states = np.full((self.width, self.height), 0)
+        self.total_episode_reward = 0.0
+
+    @staticmethod
+    def _gen_mission(color: str, obj_type: str):
+        return f"pick up the {color} {obj_type}"
+
+    def observations_changed(self, current_obs, next_obs, current_state, next_state):
+        # Compare images
+        positions_equal = current_obs.get('position') == next_obs.get('position')
+
+        directions_equal = True
+        if self.consider_position:
+            # Compare directions
+            directions_equal = current_obs['direction'] == next_obs['direction']
+
+        state_change = current_state == next_state
+
+        return (positions_equal and directions_equal and state_change)
+
+    def hash(self, size=32):
+        """Compute a hash that uniquely identifies the full state of the environment.
+        :param size: Size of the hashing
+        """
+        sample_hash = hashlib.sha256()
+
+        full_grid = self.get_full_obs()
+        # Convert the full grid to a list for hashing
+        full_grid_list = full_grid.flatten().tolist()
+
+        to_encode = [full_grid_list]
+
+        # Update the hash with each element
+        for item in to_encode:
+            sample_hash.update(str(item).encode("utf8"))
+
+        # Return the hashed value
+        return sample_hash.hexdigest()[:size]
+
+    def get_full_obs(self):
+        # Get the full grid representation
+        full_grid = self.grid.encode()  # Encodes the entire grid into a NumPy array
+        full_grid[self.agent_pos[0]][self.agent_pos[1]] = np.array(
+            [OBJECT_TO_IDX["agent"], COLOR_TO_IDX["red"], self.agent_dir]
+        )
+        return full_grid
+
+    def gen_obs(self):
+        full_grid = self.get_full_obs()
+        return {
+            'image': full_grid,
+            'direction': self.agent_dir,
+            'position': self.agent_pos,
+        }
+
+    def flatten_observation(self, observation):
+        grid_flattened = observation["image"].flatten()
+        position_flattened = np.array(self.agent_pos, dtype=np.float32)
+        direction_flattened = np.array([self.agent_dir], dtype=np.float32)
+
+        # Concatenate all components into a single flat array
+        return np.concatenate([grid_flattened, position_flattened, direction_flattened])
+
+    def step(self, action):
+        self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
+        self.action_count[action] += 1
+        current_state = self.hash()
+        obs, reward, terminated, truncated, _ = super().step(action)
+        next_state = self.hash()
+
+        self.intrinsic_reward = 0.0
+
+        if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
+            self.dowham_reward.update_state_visits(current_state, next_state)
+            state_changed = current_state != next_state
+            self.dowham_reward.update_usage(current_state, action)
+            self.dowham_reward.update_effectiveness(current_state, action, next_state, state_changed)
+            intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(current_state, action, next_state,
+                                                                             state_changed)
+            self.intrinsic_reward = self.intrinsic_reward_scaling * intrinsic_reward
+
+        if self.enable_count_based:
+            self.intrinsic_reward = self.count_exploration.update(current_state, action, reward, next_state)
+            self.intrinsic_reward = self.intrinsic_reward_scaling * self.intrinsic_reward
+
+        # Compute intrinsic reward if RND is active
+        if self.enable_rnd:
+            next_obs = self.gen_obs()
+            flat_obs = self.flatten_observation(next_obs)
+            self.intrinsic_reward = self.rnd.compute_intrinsic_reward(flat_obs)
+            self.intrinsic_reward = self.intrinsic_reward_scaling * self.intrinsic_reward
+            # Update predictor network
+            self.rnd.update_predictor([flat_obs])
+
+        # self.intrinsic_reward = self.normalizer.normalize(self.intrinsic_reward)
+        reward += self.intrinsic_reward
+        self.done = terminated
+
+        if terminated:
+            reward += 10
+
+        self.total_episode_reward += reward
+
+        return obs, reward, terminated, truncated, {}
+
+    def reset(self, **kwargs):
+        self.episode_history = []
+        if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
+            self.dowham_reward.reset_episode()
+
+        if self.enable_count_based:
+            self.count_exploration.reset()
+
+        self.action_count = {
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 0,
+            6: 0,
+        }
+        self.success_history.append(self.done)
+        self.success_rate = sum(self.success_history) / len(self.success_history)
         obs, _ = super().reset(**kwargs)
 
         # Update observation normalization if RND is active

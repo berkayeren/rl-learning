@@ -11,6 +11,7 @@ from gymnasium.wrappers import ResizeObservation
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 from ray import tune
 from ray.air import CheckpointConfig
+from ray.rllib.models import ModelCatalog
 from ray.tune import register_env
 
 from callbacks.minigrid.callback import MinigridCallback
@@ -18,6 +19,7 @@ from callbacks.pacman.callback import PacmanCallback
 from environments.minigrid_env import CustomPlaygroundEnv
 from environments.minigrid_wrapper import FlattenedPositionWrapper
 from environments.pacman_env import PacmanWrapper
+from models.custom_dqn_model import SimpleGridModel
 
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 os.environ["RAY_DEDUP_LOGS"] = "0"
@@ -53,8 +55,7 @@ def get_trainer_config(
     Returns:
         Union["DQNConfig", "PPOConfig"]: The configuration object for the specified algorithm.
     """
-    max_seq_len = 100
-    rollout_fragment_length = max_seq_len * 10
+    max_seq_len = 200
 
     if algo_name.lower() == 'dqn':
         from ray.rllib.algorithms.dqn import DQNConfig
@@ -171,6 +172,7 @@ def get_trainer_config(
         )
     elif algo_name.lower() == 'impala':
         from ray.rllib.algorithms import ImpalaConfig
+        ModelCatalog.register_custom_model("custom_gridworld_model", SimpleGridModel)
         config = (
             ImpalaConfig()
             .environment(env=env_name, disable_env_checking=True)
@@ -178,7 +180,7 @@ def get_trainer_config(
                 num_rollout_workers=args.num_rollout_workers,
                 num_envs_per_worker=args.num_envs_per_worker,
                 rollout_fragment_length=args.batch_size,
-                batch_mode="truncate_episodes"
+                batch_mode="complete_episodes"
             )
             .evaluation(
                 evaluation_parallel_to_training=False,
@@ -190,43 +192,41 @@ def get_trainer_config(
             .callbacks(partial(callback, path=output_folder_path))
             .training(
                 model={
-                    "conv_filters": None,  # Remove convolutional layers
-                    "fcnet_hiddens": [256, 128],  # Reduced for flattened input
-                    "fcnet_activation": "relu",
+                    "custom_model": "custom_gridworld_model",
+                    "custom_model_config": {
+                        "custom_activation": "relu",
+                        "activation_fn_value_name": "relu",
+                    },
+                    "conv_filters": None,
                     "use_lstm": False,
-                    # "lstm_cell_size": 1024,  # Reduced LSTM size
                     "max_seq_len": max_seq_len,
-                    # "lstm_use_prev_action": True,
-                    # "lstm_use_prev_reward": True,
                     "vf_share_layers": False,
-                    # "post_fcnet_hiddens": [1024, 1024],  # Reduced post-LSTM layer
-                    # "post_fcnet_activation": "relu",
                 },
                 opt_type="rmsprop",
                 optimizer={"type": "RMSProp"},
                 gamma=0.99,
                 lr=1e-5,
-                entropy_coeff=0.001,
+                entropy_coeff=0.0001,
                 vf_loss_coeff=0.5,
                 grad_clip=40,
                 train_batch_size=args.batch_size,
                 replay_proportion=0.4,
                 replay_buffer_num_slots=100,
             )
-            .exploration(
-                exploration_config={
-                    "type": "EpsilonGreedy",  # Default exploration strategy
-                    "epsilon_schedule": {
-                        "type": "PiecewiseSchedule",
-                        "endpoints": [
-                            (0, 0.0),  # Start with no exploration
-                            (1_000_000, 0.2),  # Gradually introduce exploration
-                            (2_000_000, 0.3)  # Increase exploration to moderate levels
-                        ],
-                        "outside_value": 0.2
-                    }
-                }
-            )
+            # .exploration(
+            #     exploration_config={
+            #         "type": "EpsilonGreedy",  # Default exploration strategy
+            #         "epsilon_schedule": {
+            #             "type": "PiecewiseSchedule",
+            #             "endpoints": [
+            #                 (0, 0.0),  # Start with no exploration
+            #                 (1_000_000, 0.2),  # Gradually introduce exploration
+            #                 (2_000_000, 0.3)  # Increase exploration to moderate levels
+            #             ],
+            #             "outside_value": 0.2
+            #         }
+            #     }
+            # )
             .resources(
                 num_gpus=args.num_gpus / args.num_rollout_workers,
                 num_cpus_per_worker=1,
@@ -464,21 +464,20 @@ if __name__ == "__main__":
         env_config = trial.config.get("env_config", {})
         enable_dowham_reward_v1 = env_config.get("enable_dowham_reward_v1", False)
         enable_dowham_reward_v2 = env_config.get("enable_dowham_reward_v2", False)
-        randomize_state_transition = env_config.get("randomize_state_transition", False)
-        max_steps = env_config.get("max_steps", False)
         enable_count_based = env_config.get("enable_count_based", False)
         enable_rnd = env_config.get("enable_rnd", False)
         train_batch_size = trial.config.get("train_batch_size", "unknown")
         fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
         grad_clip = trial.config.get("grad_clip", "unknown")
-        vf_loss_coeff = trial.config.get("vf_loss_coeff", "unknown")
-        batch_mode = trial.config.get("batch_mode", "unknown")
-        transition_divisor = env_config.get("transition_divisor", "1")
+        custom_activation = trial.config.get("model", {}).get("custom_model_config", {}).get("custom_activation",
+                                                                                             "unknown")
+        activation_fn_value_name = trial.config.get("model", {}).get("custom_model_config", {}).get(
+            "activation_fn_value_name", "unknown")
 
         if enable_dowham_reward_v1:
             return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}Transition{randomize_state_transition}{max_steps}vf{vf_loss_coeff}{batch_mode}{transition_divisor}"
+            return f"DoWhaMV2_batch{train_batch_size}{custom_activation}{activation_fn_value_name}"
         elif enable_count_based:
             return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
@@ -504,7 +503,7 @@ if __name__ == "__main__":
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 10_000_000,  # Stop after 5 million timesteps
+            "timesteps_total": 5_000_000,  # Stop after 5 million timesteps
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs

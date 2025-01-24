@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -224,13 +225,6 @@ class NatureCNN(TorchModelV2, nn.Module):
         return self.value_head(self._features).squeeze(1)
 
 
-import numpy as np
-import torch
-import torch.nn as nn
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.annotations import override
-
-
 class CustomMiniGridLSTM(TorchModelV2, nn.Module):
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
         TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
@@ -323,3 +317,85 @@ class CustomMiniGridLSTM(TorchModelV2, nn.Module):
         self.network = self.network.to(device)
         self.value_branch = self.value_branch.to(device)
         return self
+
+
+class SimpleGridModel(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # Determine device
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("Using CUDA device")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device("cpu")
+            print("Using MPS device")
+        else:
+            self.device = torch.device("cpu")
+            print("Using CPU device")
+
+        self.obs_size = obs_space.shape[0]
+
+        # Get activation function from model_config
+        activation_fn_name = model_config['custom_model_config'].get("custom_activation", "relu").lower()
+        activation_fn_value_name = model_config['custom_model_config'].get("activation_fn_value_name", "relu").lower()
+        self.activation_fn = self._get_activation_function(activation_fn_name)
+        self.activation_fn_value = self._get_activation_function(activation_fn_value_name)
+        print(
+            f"Using activation function: {activation_fn_name},Using value activation function: {activation_fn_value_name}")
+
+        # Feature extraction layers
+        self.network = nn.Sequential(
+            nn.Linear(self.obs_size, 256),  # Process the flattened input
+            self.activation_fn(),
+            nn.Linear(256, 128),  # Reduce dimensionality further
+            self.activation_fn(),
+            nn.Linear(128, 128),  # Extra layer for more feature extraction
+            self.activation_fn(),
+        ).to(self.device)
+
+        # Output layer for action logits
+        self.fc_out = nn.Linear(128, num_outputs).to(self.device)
+
+        # Value branch
+        self.value_branch = nn.Sequential(
+            nn.Linear(128, 64),  # Smaller intermediate layer
+            self.activation_fn_value(),
+            nn.Linear(64, 1)  # Single output for the value function
+        ).to(self.device)
+
+    def _get_activation_function(self, name):
+        """
+        Return the corresponding activation function class based on its name.
+        """
+        activation_map = {
+            "relu": nn.ReLU,
+            "elu": nn.ELU,
+            "leaky_relu": nn.LeakyReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "softplus": nn.Softplus
+        }
+        return activation_map.get(name, nn.ReLU)
+
+    def forward(self, input_dict, state, seq_lens):
+        # Extract components from the OrderedDict
+        direction = input_dict["obs"]["direction"].float().to(self.device)  # Process direction
+        image = input_dict["obs"]["image"].float().to(self.device)  # Process image
+        position = input_dict["obs"]["position"].float().to(self.device)  # Process position
+        goal_distance = input_dict["obs"]["goal_distance"].float().to(self.device)  # Process position
+
+        # Combine processed components
+        combined_features = torch.cat([direction, image, position, goal_distance], dim=-1)
+
+        # Pass through the network
+        x = self.network(combined_features).to(self.device)
+        logits = self.fc_out(x).to(self.device)
+
+        # Save features for value computation
+        self._features = x
+        return logits, state
+
+    def value_function(self):
+        return self.value_branch(self._features).squeeze(-1)
