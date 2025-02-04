@@ -4,7 +4,6 @@ import os
 import sys
 
 import gymnasium
-import pandas as pd
 import ray
 from gymnasium import register
 from ray.tune import register_env
@@ -12,7 +11,7 @@ from ray.tune import register_env
 from callbacks.minigrid.callback import MinigridCallback
 from callbacks.pacman.callback import PacmanCallback
 from custom_train import get_trainer_config
-from environments.minigrid_env import CustomPlaygroundEnv
+from environments.minigrid_env import CustomPlaygroundCrossingEnv
 from environments.minigrid_wrapper import FlattenedPositionWrapper
 
 # Initialize Ray
@@ -57,12 +56,12 @@ if __name__ == "__main__":
     # Register the custom environment
     register_env("MiniGrid-CustomPlayground-v0",
                  lambda config: FlattenedPositionWrapper(
-                     CustomPlaygroundEnv(render_mode=render_mode, enable_dowham_reward_v2=args.enable_dowham_reward)))
+                     CustomPlaygroundCrossingEnv(render_mode=render_mode, enable_dowham_reward_v2=False)))
 
     register(
         id="MiniGrid-CustomPlayground-v0",
         entry_point=lambda: FlattenedPositionWrapper(
-            CustomPlaygroundEnv(render_mode="human", enable_dowham_reward_v2=True))
+            CustomPlaygroundCrossingEnv(render_mode="human", enable_dowham_reward_v2=False))
     )
 
     # Get total CPUs
@@ -106,7 +105,7 @@ if __name__ == "__main__":
     if not args.checkpoint:
         try:
             trainer.restore(
-                f'/Users/berkayeren/ray_results/IMPALA_2025-01-15_21-59-08/DoWhaMV2_batch32[256, 128]42_6db2/checkpoint_000001')
+                f'')
         except ValueError:
             sys.stdout.write("Checkpoint not found, starting from scratch.\n")
 
@@ -126,15 +125,17 @@ if __name__ == "__main__":
         while not done:
 
             # Compute the action using the trained policy
-            action = trainer.compute_single_action(observation=observation, prev_action=action, prev_reward=reward)
+            action = trainer.compute_single_action(observation=observation, prev_action=action, prev_reward=reward,
+                                                   explore=True)
             # Take the action in the environment
             observation, reward, done, info, _ = env.step(action)
+            print(f"Action: {action}, Reward: {reward}, Done: {done}")
             if render_mode == 'human':
                 env.render()
 
         # Convert the dictionary to a DataFrame
-        date_string = datetime.now().strftime("%Y-%m-%d-%H%M")
-        df = pd.DataFrame(list(visited_states.items()))
-        df.to_csv(f'trail-algo{args.algo}-episode{episode}-checkpoint{args.checkpoint}-{date_string}.csv', index=False)
+        # date_string = datetime.now().strftime("%Y-%m-%d-%H%M")
+        # df = pd.DataFrame(list(visited_states.items()))
+        # df.to_csv(f'trail-algo{args.algo}-episode{episode}-checkpoint{args.checkpoint}-{date_string}.csv', index=False)
 
     ray.shutdown()

@@ -6,10 +6,6 @@ base_config:
     enable_dowham_reward_v2: false
     enable_count_based: false
     enable_rnd: false
-  model:
-    fcnet_activation: relu
-    post_fcnet_activation: relu
-    fcnet_hiddens: [ 256, 256 ]
   train_batch_size: 256
   rollout_fragment_length: 256
 
@@ -35,396 +31,53 @@ variations:
       enable_dowham_reward_v2: true
       max_steps: 200
       transition_divisor: 10
+      terminate_bonus: 10
     model:
       custom_model_config:
         custom_activation: relu
         activation_fn_value_name: relu
+      use_lstm: False
+      lstm_cell_size: 512
+      lstm_use_prev_action: False
+      lstm_use_prev_reward: False
+    train_batch_size: 32
+    rollout_fragment_length: 32
+    grad_clip: 40.0
+    entropy_coeff: 0.0005
+    vf_loss_coeff: 0.5
 
-  - name: combination_relu_elu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: relu
-        activation_fn_value_name: elu
 
-  - name: combination_relu_leaky_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: relu
-        activation_fn_value_name: leaky_relu
+  # - name: combination_relu_relu
+  #   env_config:
+  #     enable_dowham_reward_v1: false
+  #     enable_dowham_reward_v2: true
+  #     max_steps: 484
+  #     transition_divisor: 1
+  #     terminate_bonus: 10
+  #   # model:
+  #   #   custom_model_config:
+  #   #     custom_activation: leaky_relu
+  #   #     activation_fn_value_name: leaky_relu
+  #   lr: 0.001
+  #   train_batch_size: 128
+  #   grad_clip: 40.0
+  #   entropy_coeff: 0.001
 
-  - name: combination_relu_tanh
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: relu
-        activation_fn_value_name: tanh
-
-  - name: combination_relu_sigmoid
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: relu
-        activation_fn_value_name: sigmoid
-
-  - name: combination_relu_softplus
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: relu
-        activation_fn_value_name: softplus
-
-  - name: combination_elu_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: elu
-        activation_fn_value_name: relu
-
-  - name: combination_elu_elu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: elu
-        activation_fn_value_name: elu
-
-  - name: combination_elu_leaky_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: elu
-        activation_fn_value_name: leaky_relu
-
-  - name: combination_elu_tanh
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: elu
-        activation_fn_value_name: tanh
-
-  - name: combination_elu_sigmoid
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: elu
-        activation_fn_value_name: sigmoid
-
-  - name: combination_elu_softplus
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: elu
-        activation_fn_value_name: softplus
-
-  - name: combination_leaky_relu_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: leaky_relu
-        activation_fn_value_name: relu
-
-  - name: combination_leaky_relu_elu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: leaky_relu
-        activation_fn_value_name: elu
-
-  - name: combination_leaky_relu_leaky_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: leaky_relu
-        activation_fn_value_name: leaky_relu
-
-  - name: combination_leaky_relu_tanh
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: leaky_relu
-        activation_fn_value_name: tanh
-
-  - name: combination_leaky_relu_sigmoid
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: leaky_relu
-        activation_fn_value_name: sigmoid
-
-  - name: combination_leaky_relu_softplus
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: leaky_relu
-        activation_fn_value_name: softplus
-
-  - name: combination_tanh_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: tanh
-        activation_fn_value_name: relu
-
-  - name: combination_tanh_elu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: tanh
-        activation_fn_value_name: elu
-
-  - name: combination_tanh_leaky_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: tanh
-        activation_fn_value_name: leaky_relu
-
-  - name: combination_tanh_tanh
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: tanh
-        activation_fn_value_name: tanh
-
-  - name: combination_tanh_sigmoid
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: tanh
-        activation_fn_value_name: sigmoid
-
-  - name: combination_tanh_softplus
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: tanh
-        activation_fn_value_name: softplus
-
-  - name: combination_sigmoid_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: sigmoid
-        activation_fn_value_name: relu
-
-  - name: combination_sigmoid_elu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: sigmoid
-        activation_fn_value_name: elu
-
-  - name: combination_sigmoid_leaky_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: sigmoid
-        activation_fn_value_name: leaky_relu
-
-  - name: combination_sigmoid_tanh
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: sigmoid
-        activation_fn_value_name: tanh
-
-  - name: combination_sigmoid_sigmoid
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: sigmoid
-        activation_fn_value_name: sigmoid
-
-  - name: combination_sigmoid_softplus
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: sigmoid
-        activation_fn_value_name: softplus
-
-  - name: combination_softplus_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: softplus
-        activation_fn_value_name: relu
-
-  - name: combination_softplus_elu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: softplus
-        activation_fn_value_name: elu
-
-  - name: combination_softplus_leaky_relu
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: softplus
-        activation_fn_value_name: leaky_relu
-
-  - name: combination_softplus_tanh
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: softplus
-        activation_fn_value_name: tanh
-
-  - name: combination_softplus_sigmoid
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: softplus
-        activation_fn_value_name: sigmoid
-
-  - name: combination_softplus_softplus
-    env_config:
-      enable_dowham_reward_v1: false
-      enable_dowham_reward_v2: true
-      max_steps: 200
-      transition_divisor: 10
-    model:
-      custom_model_config:
-        custom_activation: softplus
-        activation_fn_value_name: softplus
-
+  # - name: combination_relu_relu
+  #   env_config:
+  #     enable_dowham_reward_v1: false
+  #     enable_dowham_reward_v2: false
+  #     max_steps: 30
+  #     transition_divisor: 3
+  #     terminate_bonus: 10
+  #   model:
+  #     custom_model_config:
+  #       custom_activation: elu
+  #       #custom_activation: elu
+  #       activation_fn_value_name: relu
+  #       #activation_fn_value_name: tanh
+  #   lr: 0.001
+  #   train_batch_size: 256
   #  # -----------------------------------------------------
   #  # RND
   #  # -----------------------------------------------------

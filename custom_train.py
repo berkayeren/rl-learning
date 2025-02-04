@@ -16,10 +16,10 @@ from ray.tune import register_env
 
 from callbacks.minigrid.callback import MinigridCallback
 from callbacks.pacman.callback import PacmanCallback
-from environments.minigrid_env import CustomPlaygroundEnv
+from environments.minigrid_env import CustomPlaygroundCrossingEnv
 from environments.minigrid_wrapper import FlattenedPositionWrapper
 from environments.pacman_env import PacmanWrapper
-from models.custom_dqn_model import SimpleGridModel
+from models.custom_dqn_model import WallAwareGridModel, SpatialAwareGridModel
 
 os.environ['PYTHONWARNINGS'] = "ignore::DeprecationWarning"
 os.environ["RAY_DEDUP_LOGS"] = "0"
@@ -59,6 +59,7 @@ def get_trainer_config(
 
     if algo_name.lower() == 'dqn':
         from ray.rllib.algorithms.dqn import DQNConfig
+        ModelCatalog.register_custom_model("custom_gridworld_model", WallAwareGridModel)
         config = (
             DQNConfig()
             .environment(env=env_name, disable_env_checking=True)
@@ -82,15 +83,15 @@ def get_trainer_config(
                 grad_clip=42,  # Max norm gradient
                 optimizer={"type": "RMSProp"},
                 model={
-                    # "dim": 88,
-                    # "conv_filters": [
-                    #     [32, [3, 3], 5],  # Layer 1
-                    #     [64, [3, 3], 5],  # Layer 2
-                    #     [128, [3, 3], 2],  # Layer 3
-                    # ],
-                    "conv_activation": "relu",
-                    "fcnet_hiddens": [1024, 1024],
-                    "post_fcnet_activation": "tanh"
+                    "custom_model": "custom_gridworld_model",
+                    "custom_model_config": {
+                        "custom_activation": "relu",
+                        "activation_fn_value_name": "relu",
+                    },
+                    "conv_filters": None,
+                    "use_lstm": False,
+                    "max_seq_len": max_seq_len,
+                    "vf_share_layers": False,
                 },
                 dueling=True,
                 double_q=True,
@@ -172,7 +173,7 @@ def get_trainer_config(
         )
     elif algo_name.lower() == 'impala':
         from ray.rllib.algorithms import ImpalaConfig
-        ModelCatalog.register_custom_model("custom_gridworld_model", SimpleGridModel)
+        ModelCatalog.register_custom_model("custom_gridworld_model", SpatialAwareGridModel)
         config = (
             ImpalaConfig()
             .environment(env=env_name, disable_env_checking=True)
@@ -183,11 +184,33 @@ def get_trainer_config(
                 batch_mode="complete_episodes"
             )
             .evaluation(
-                evaluation_parallel_to_training=False,
-                evaluation_interval=10,
+                # Evaluate every N training iterations (or timesteps if you prefer).
+                # If you train for many millions of timesteps, evaluating too frequently
+                # can slow overall progress.
+                evaluation_interval=5,
+
+                # How many episodes or timesteps to evaluate each time.
+                # Setting `evaluation_duration_unit="episodes"` means we collect
+                # exactly `evaluation_duration` episodes per evaluation run.
                 evaluation_duration=10,
-                evaluation_num_workers=0,
-                evaluation_sample_timeout_s=60
+                evaluation_duration_unit="episodes",
+
+                # By default, evaluation is done serially after each training iteration.
+                # If you set this True, evaluation will happen in parallel to training
+                # (requires enough extra resources).
+                evaluation_parallel_to_training=False,
+
+                # Ensure we do not get stuck in an evaluation episode for too long.
+                evaluation_sample_timeout_s=120,
+
+                # Let the evaluation policy act greedily (explore=False) to measure
+                # the agent’s best performance rather than continuing to sample actions.
+                # evaluation_config={
+                #     "explore": False,
+                # },
+            ).experimental(
+                _disable_action_flattening=True,
+                _disable_preprocessor_api=True,
             )
             .callbacks(partial(callback, path=output_folder_path))
             .training(
@@ -197,31 +220,32 @@ def get_trainer_config(
                         "custom_activation": "relu",
                         "activation_fn_value_name": "relu",
                     },
-                    "conv_filters": None,
                     "use_lstm": False,
                     "max_seq_len": max_seq_len,
                     "vf_share_layers": False,
                 },
                 opt_type="rmsprop",
-                optimizer={"type": "RMSProp"},
+                optimizer={
+                    "type": "RMSProp",
+                    "momentum": 0.0,
+                    "eps": 0.001,
+                },
                 gamma=0.99,
-                lr=1e-5,
-                entropy_coeff=0.0001,
+                lr=1e-4,
                 vf_loss_coeff=0.5,
-                grad_clip=40,
+                # grad_clip=40,
                 train_batch_size=args.batch_size,
-                replay_proportion=0.4,
-                replay_buffer_num_slots=100,
             )
             # .exploration(
+            #     explore=True,
             #     exploration_config={
             #         "type": "EpsilonGreedy",  # Default exploration strategy
             #         "epsilon_schedule": {
             #             "type": "PiecewiseSchedule",
             #             "endpoints": [
             #                 (0, 0.0),  # Start with no exploration
-            #                 (1_000_000, 0.2),  # Gradually introduce exploration
-            #                 (2_000_000, 0.3)  # Increase exploration to moderate levels
+            #                 (1_000_000, 0.0),  # Gradually introduce exploration
+            #                 (2_000_000, 0.2),  # Increase exploration to moderate levels
             #             ],
             #             "outside_value": 0.2
             #         }
@@ -239,6 +263,8 @@ def get_trainer_config(
                 recreate_failed_workers=True,
                 restart_failed_sub_environments=True,
                 worker_health_probe_timeout_s=300
+            ).debugging(
+                fake_sampler=False,
             )
         )
     else:
@@ -289,7 +315,7 @@ if __name__ == "__main__":
              num_cpus=total_cpus, runtime_env={
             "env_vars": {
                 "RAY_DISABLE_WORKER_STARTUP_LOGS": "0",
-                "RAY_LOG_TO_STDERR": "1"
+                "RAY_LOG_TO_STDERR": "0",
             }
         })
 
@@ -317,11 +343,18 @@ if __name__ == "__main__":
         callback = PacmanCallback
 
     if args.env == "minigrid":
-        env_name = "MiniGrid-CustomPlayground-v0"
+        from gymnasium.envs.registration import register
+
+        env_name = "CustomPlaygroundCrossingEnv-v0"
         # Register the custom environment
-        register_env("MiniGrid-CustomPlayground-v0",
+        register_env("CustomPlaygroundCrossingEnv-v0",
                      lambda config: FlattenedPositionWrapper(
-                         CustomPlaygroundEnv(render_mode=args.render_mode, **config)))
+                         CustomPlaygroundCrossingEnv(render_mode=args.render_mode, **config)))
+
+        register(
+            id="CustomPlaygroundCrossingEnv-v0",
+            entry_point=lambda: FlattenedPositionWrapper(
+                CustomPlaygroundCrossingEnv(render_mode=args.render_mode, **config)))
 
         callback = MinigridCallback
 
@@ -379,8 +412,6 @@ if __name__ == "__main__":
             "enable_count_based": False,
             "enable_rnd": False,
         }
-        dowhamv2_config["model"]["fcnet_activation"] = "tanh"
-        dowhamv2_config["model"]["post_fcnet_activation"] = "tanh"
         all_configs.append(dowhamv2_config)
 
         # Create variations for DoWhaM
@@ -468,7 +499,11 @@ if __name__ == "__main__":
         enable_rnd = env_config.get("enable_rnd", False)
         train_batch_size = trial.config.get("train_batch_size", "unknown")
         fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
+        lstm = trial.config.get("model", {}).get("use_lstm", "unknown")
         grad_clip = trial.config.get("grad_clip", "unknown")
+        lr = trial.config.get("lr", "unknown")
+        vf_loss_coeff = trial.config.get("vf_loss_coeff", "unknown")
+        entropy_coeff = trial.config.get("entropy_coeff", "unknown")
         custom_activation = trial.config.get("model", {}).get("custom_model_config", {}).get("custom_activation",
                                                                                              "unknown")
         activation_fn_value_name = trial.config.get("model", {}).get("custom_model_config", {}).get(
@@ -477,7 +512,7 @@ if __name__ == "__main__":
         if enable_dowham_reward_v1:
             return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
         if enable_dowham_reward_v2:
-            return f"DoWhaMV2_batch{train_batch_size}{custom_activation}{activation_fn_value_name}"
+            return f"DoWhaMV2_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}"
         elif enable_count_based:
             return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
         elif enable_rnd:
@@ -488,9 +523,9 @@ if __name__ == "__main__":
 
     checkpoint_config = CheckpointConfig(
         num_to_keep=5,
-        checkpoint_frequency=10,
+        checkpoint_frequency=5,
         checkpoint_at_end=True,
-        checkpoint_score_attribute="episode_len_mean",
+        checkpoint_score_attribute="evaluation/episode_len_mean",
         checkpoint_score_order="min"
     )
 
@@ -503,7 +538,7 @@ if __name__ == "__main__":
         "IMPALA",  # Specify the RLlib algorithm
         config=tune.grid_search(all_configs),
         stop={
-            "timesteps_total": 5_000_000,  # Stop after 5 million timesteps
+            "timesteps_total": 100_000_000,
         },
         checkpoint_config=checkpoint_config,
         verbose=2,  # Display detailed logs
