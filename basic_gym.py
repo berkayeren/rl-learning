@@ -12,12 +12,14 @@ if __name__ == "__main__":
     ray.init(ignore_reinit_error=True, configure_logging=False)
     faulthandler.disable()
 
-    env = RGBImgObsWrapper(CustomEnv(env_type=CustomEnv.Environments.crossing, render_mode="human"))
+    env = RGBImgObsWrapper(
+        CustomEnv(env_type=CustomEnv.Environments.crossing, enable_dowham_reward_v2=True, render_mode="human"))
 
     # Register the custom environment
     register_env("CustomPlaygroundCrossingEnv-v0",
                  lambda config:
-                 RGBImgObsWrapper(CustomEnv(env_type=CustomEnv.Environments.crossing, **config)))
+                 RGBImgObsWrapper(
+                     CustomEnv(env_type=CustomEnv.Environments.crossing, enable_dowham_reward_v2=True, **config)))
 
     algo = PPO.from_checkpoint(
         "",

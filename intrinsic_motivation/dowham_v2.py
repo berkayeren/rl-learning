@@ -122,7 +122,7 @@ class DoWhaMIntrinsicRewardV2:
             return 1.0  # Maximum reward for first effectiveness
 
         ratio = E / U
-        exp_term = self.eta ** ratio
+        exp_term = self.eta ** (1 - ratio)
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
@@ -148,23 +148,34 @@ class DoWhaMIntrinsicRewardV2:
 
     def calculate_intrinsic_reward(self, obs, action, next_obs, state_changed):
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
-        state_count = self.state_visit_counts[obs[:2]]
+        state_count = self.state_visit_counts[obs]
         action_bonus = self.calculate_bonus(obs, action)
         intrinsic_reward = action_bonus / np.sqrt(state_count)
         reward = overexploration_penalty = 0.0
 
         if state_changed:
             reward = intrinsic_reward
-        elif self.action_state[obs][action].count(False) > 4:
-            overexploration_penalty = self.action_state[obs][action].count(False) / np.sqrt(state_count)
-            reward = max(-overexploration_penalty, -1.0)  # Cap the penalty at -1.0
+        elif self.action_state[obs][action].count(False) > 2:
+            left = self.calculate_bonus(obs, 0) / np.sqrt(state_count)
+            right = self.calculate_bonus(obs, 1) / np.sqrt(state_count)
+            forward = self.calculate_bonus(obs, 2) / np.sqrt(state_count)
+            pickup = self.calculate_bonus(obs, 3) / np.sqrt(state_count)
+            drop = self.calculate_bonus(obs, 4) / np.sqrt(state_count)
+            toggle = self.calculate_bonus(obs, 5) / np.sqrt(state_count)
+            done = self.calculate_bonus(obs, 6) / np.sqrt(state_count)
+
+            penalty = max(left, right, forward, pickup, drop, toggle, done)
+            # print(
+            #     f"Selected Action: {action} | Left: {left}, Right: {right}, Forward: {forward}, Pickup: {pickup}, Drop: {drop}, Toggle: {toggle}, Done: {done}")
+
+            reward = max(-penalty, -1.0)  # Cap the penalty at -1.0
 
         # print(
         #     f"Transition: {transition}, Reward: {reward}, IsReward: {is_reward_available}, State Count: {state_count}, Action Bonus: {action_bonus}: Action: {Actions(action).name}")
 
         # print(
         #     f"Reward:{reward}, {overexploration_penalty}, State Count: {state_count}/{self.action_state[obs][action].count(False)}, Action Bonus: {action_bonus}: Action: {Actions(action).name}")
-        return round(reward, 2)
+        return round(reward, 3)
 
     def reset_episode(self):
         self.state_visit_counts.clear()

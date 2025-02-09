@@ -777,7 +777,7 @@ class CustomPlaygroundCrossingEnv(CrossingEnv):
             max_steps=self.max_steps, render_mode=render_mode,
             obstacle_type=Wall,
             num_crossings=1,
-            size=11
+            size=size
         )
 
         self.observation_space = spaces.Dict({
