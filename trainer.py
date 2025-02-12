@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 from enum import IntEnum
 from typing import Union, Optional, Dict
@@ -8,9 +9,10 @@ import gymnasium as gym
 import numpy as np
 import ray
 from gymnasium import spaces
+from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Goal, Lava, Wall
-from minigrid.envs import EmptyEnv
+from minigrid.core.world_object import Goal, Lava, Wall, Door
+from minigrid.envs import EmptyEnv, MultiRoom
 from minigrid.wrappers import RGBImgObsWrapper
 from ray import tune
 from ray.rllib import BaseEnv, Policy
@@ -92,6 +94,8 @@ class CustomEnv(EmptyEnv):
     class Environments(IntEnum):
         empty = 0
         crossing = 1
+        four_rooms = 2
+        multi_room = 3
 
     class NavigationOnlyActions(IntEnum):
         # Turn left, turn right, move forward
@@ -101,7 +105,8 @@ class CustomEnv(EmptyEnv):
         done = 6
 
     def __init__(self, **kwargs):
-        self.env_type = kwargs.pop("env_type", CustomEnv.Environments.crossing)
+        print(f"Environment Config: {kwargs}")
+        self.env_type = kwargs.pop("env_type", CustomEnv.Environments.multi_room)
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
         print(f"Enable Dowham Reward V2: {self.enable_dowham_reward_v2}")
@@ -115,7 +120,7 @@ class CustomEnv(EmptyEnv):
         self.highlight = False
 
         super().__init__(
-            size=9,
+            size=11,
             tile_size=self.tile_size,
             highlight=self.highlight,
             **kwargs)
@@ -184,7 +189,10 @@ class CustomEnv(EmptyEnv):
             )
             self.intrinsic_reward *= 0.05
 
-        reward += self.intrinsic_reward
+        if terminated:
+            reward = reward * 10
+        else:
+            reward += self.intrinsic_reward
 
         self.done = terminated
         return obs, reward, terminated, truncated, {}
@@ -194,6 +202,10 @@ class CustomEnv(EmptyEnv):
             self.crossing_env(width, height)
         elif self.env_type == CustomEnv.Environments.empty:
             self.empty_env_random_goal(width, height)
+        elif self.env_type == CustomEnv.Environments.four_rooms:
+            self.four_rooms(width, height)
+        elif self.env_type == CustomEnv.Environments.multi_room:
+            self.multi_room(width, height)
 
     def img_observation(self, size=32):
         rgb_img = self.get_frame(
@@ -299,6 +311,235 @@ class CustomEnv(EmptyEnv):
                 self.put_obj(Goal(), self.goal_pos[0], self.goal_pos[1])
                 break
 
+    def four_rooms(self, width, height):
+        self.agent_pos = np.array((1, 1))
+        self.agent_dir = 0
+        self.goal_pos = (width - 2, height - 2)
+        self._agent_default_pos = self.agent_pos
+        self._goal_default_pos = self.goal_pos
+        # Create the grid
+        self.grid = Grid(width, height)
+
+        # Generate the surrounding walls
+        self.grid.horz_wall(0, 0)
+        self.grid.horz_wall(0, height - 1)
+        self.grid.vert_wall(0, 0)
+        self.grid.vert_wall(width - 1, 0)
+
+        room_w = width // 2
+        room_h = height // 2
+
+        # For each row of rooms
+        for j in range(0, 2):
+            # For each column
+            for i in range(0, 2):
+                xL = i * room_w
+                yT = j * room_h
+                xR = xL + room_w
+                yB = yT + room_h
+
+                # Bottom wall and door
+                if i + 1 < 2:
+                    self.grid.vert_wall(xR, yT, room_h)
+                    pos = (xR, self._rand_int(yT + 1, yB))
+                    self.grid.set(*pos, None)
+
+                # Bottom wall and door
+                if j + 1 < 2:
+                    self.grid.horz_wall(xL, yB, room_w)
+                    pos = (self._rand_int(xL + 1, xR), yB)
+                    self.grid.set(*pos, None)
+
+        # Randomize the player start position and orientation
+        if self._agent_default_pos is not None:
+            self.agent_pos = self._agent_default_pos
+            self.grid.set(*self._agent_default_pos, None)
+            # assuming random start direction
+            self.agent_dir = self._rand_int(0, 4)
+        else:
+            self.place_agent()
+
+        if self._goal_default_pos is not None:
+            goal = Goal()
+            self.put_obj(goal, *self._goal_default_pos)
+            goal.init_pos, goal.cur_pos = self._goal_default_pos
+        else:
+            self.place_obj(Goal())
+
+    def multi_room(self, width, height):
+        self.minNumRooms = 2
+        self.maxNumRooms = 2
+        self.maxRoomSize = 9
+        self.max_steps = self.maxNumRooms * 20
+
+        roomList = []
+
+        # Choose a random number of rooms to generate
+        numRooms = self._rand_int(self.minNumRooms, self.maxNumRooms + 1)
+
+        while len(roomList) < numRooms:
+            curRoomList = []
+
+            entryDoorPos = (self._rand_int(0, width - 2), self._rand_int(0, width - 2))
+
+            # Recursively place the rooms
+            self._placeRoom(
+                numRooms,
+                roomList=curRoomList,
+                minSz=4,
+                maxSz=self.maxRoomSize,
+                entryDoorWall=2,
+                entryDoorPos=entryDoorPos,
+            )
+
+            if len(curRoomList) > len(roomList):
+                roomList = curRoomList
+
+        # Store the list of rooms in this environment
+        assert len(roomList) > 0
+        self.rooms = roomList
+
+        # Create the grid
+        self.grid = Grid(width, height)
+        wall = Wall()
+
+        prevDoorColor = None
+
+        # For each room
+        for idx, room in enumerate(roomList):
+            topX, topY = room.top
+            sizeX, sizeY = room.size
+
+            # Draw the top and bottom walls
+            for i in range(0, sizeX):
+                self.grid.set(topX + i, topY, wall)
+                self.grid.set(topX + i, topY + sizeY - 1, wall)
+
+            # Draw the left and right walls
+            for j in range(0, sizeY):
+                self.grid.set(topX, topY + j, wall)
+                self.grid.set(topX + sizeX - 1, topY + j, wall)
+
+            # If this isn't the first room, place the entry door
+            if idx > 0:
+                # Pick a door color different from the previous one
+                doorColors = set(COLOR_NAMES)
+                if prevDoorColor:
+                    doorColors.remove(prevDoorColor)
+                # Note: the use of sorting here guarantees determinism,
+                # This is needed because Python's set is not deterministic
+                doorColor = self._rand_elem(sorted(doorColors))
+
+                entryDoor = Door(doorColor)
+                self.grid.set(room.entryDoorPos[0], room.entryDoorPos[1], entryDoor)
+                prevDoorColor = doorColor
+
+                prevRoom = roomList[idx - 1]
+                prevRoom.exitDoorPos = room.entryDoorPos
+
+        # Randomize the starting agent position and direction
+        self.place_agent(roomList[0].top, roomList[0].size)
+
+        # Place the final goal in the last room
+        self.goal_pos = self.place_obj(Goal(), roomList[-1].top, roomList[-1].size)
+
+        self.mission = "traverse the rooms to get to the goal"
+
+    def _placeRoom(self, numLeft, roomList, minSz, maxSz, entryDoorWall, entryDoorPos):
+        # Choose the room size randomly
+        sizeX = self._rand_int(minSz, maxSz + 1)
+        sizeY = self._rand_int(minSz, maxSz + 1)
+
+        # The first room will be at the door position
+        if len(roomList) == 0:
+            topX, topY = entryDoorPos
+        # Entry on the right
+        elif entryDoorWall == 0:
+            topX = entryDoorPos[0] - sizeX + 1
+            y = entryDoorPos[1]
+            topY = self._rand_int(y - sizeY + 2, y)
+        # Entry wall on the south
+        elif entryDoorWall == 1:
+            x = entryDoorPos[0]
+            topX = self._rand_int(x - sizeX + 2, x)
+            topY = entryDoorPos[1] - sizeY + 1
+        # Entry wall on the left
+        elif entryDoorWall == 2:
+            topX = entryDoorPos[0]
+            y = entryDoorPos[1]
+            topY = self._rand_int(y - sizeY + 2, y)
+        # Entry wall on the top
+        elif entryDoorWall == 3:
+            x = entryDoorPos[0]
+            topX = self._rand_int(x - sizeX + 2, x)
+            topY = entryDoorPos[1]
+        else:
+            assert False, entryDoorWall
+
+        # If the room is out of the grid, can't place a room here
+        if topX < 0 or topY < 0:
+            return False
+        if topX + sizeX > self.width or topY + sizeY >= self.height:
+            return False
+
+        # If the room intersects with previous rooms, can't place it here
+        for room in roomList[:-1]:
+            nonOverlap = (
+                    topX + sizeX < room.top[0]
+                    or room.top[0] + room.size[0] <= topX
+                    or topY + sizeY < room.top[1]
+                    or room.top[1] + room.size[1] <= topY
+            )
+
+            if not nonOverlap:
+                return False
+
+        # Add this room to the list
+        roomList.append(MultiRoom((topX, topY), (sizeX, sizeY), entryDoorPos, None))
+
+        # If this was the last room, stop
+        if numLeft == 1:
+            return True
+
+        # Try placing the next room
+        for i in range(0, 8):
+            # Pick which wall to place the out door on
+            wallSet = {0, 1, 2, 3}
+            wallSet.remove(entryDoorWall)
+            exitDoorWall = self._rand_elem(sorted(wallSet))
+            nextEntryWall = (exitDoorWall + 2) % 4
+
+            # Pick the exit door position
+            # Exit on right wall
+            if exitDoorWall == 0:
+                exitDoorPos = (topX + sizeX - 1, topY + self._rand_int(1, sizeY - 1))
+            # Exit on south wall
+            elif exitDoorWall == 1:
+                exitDoorPos = (topX + self._rand_int(1, sizeX - 1), topY + sizeY - 1)
+            # Exit on left wall
+            elif exitDoorWall == 2:
+                exitDoorPos = (topX, topY + self._rand_int(1, sizeY - 1))
+            # Exit on north wall
+            elif exitDoorWall == 3:
+                exitDoorPos = (topX + self._rand_int(1, sizeX - 1), topY)
+            else:
+                assert False
+
+            # Recursively create the other rooms
+            success = self._placeRoom(
+                numLeft - 1,
+                roomList=roomList,
+                minSz=minSz,
+                maxSz=maxSz,
+                entryDoorWall=nextEntryWall,
+                entryDoorPos=exitDoorPos,
+            )
+
+            if success:
+                break
+
+        return True
+
     def gen_obs(self):
         obs = super().gen_obs()
         obs.pop('mission')
@@ -321,6 +562,40 @@ class CustomEnv(EmptyEnv):
         return obs, {}
 
 
+def custom_trial_name(trial):
+    """
+    Creates a custom trial name based on the configuration.
+
+    Args:
+        trial: The trial object from Ray Tune
+
+    Returns:
+        str: Custom trial name including LSTM size
+    """
+    env_config = trial.config.get("env_config", {})
+    enable_dowham_reward_v1 = env_config.get("enable_dowham_reward_v1", False)
+    enable_dowham_reward_v2 = env_config.get("enable_dowham_reward_v2", False)
+    enable_count_based = env_config.get("enable_count_based", False)
+    enable_rnd = env_config.get("enable_rnd", False)
+    train_batch_size = trial.config.get("train_batch_size", "unknown")
+    fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
+    lstm = trial.config.get("model", {}).get("use_lstm", "unknown")
+    grad_clip = trial.config.get("grad_clip", "unknown")
+    vf_loss_coeff = trial.config.get("vf_loss_coeff", "unknown")
+    entropy_coeff = trial.config.get("entropy_coeff", "unknown")
+
+    if enable_dowham_reward_v1:
+        return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
+    if enable_dowham_reward_v2:
+        return f"DoWhaMV2_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}"
+    elif enable_count_based:
+        return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
+    elif enable_rnd:
+        return f"RND_batch{train_batch_size}{fc}{grad_clip}"
+    else:
+        return f"Default_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}"
+
+
 if __name__ == "__main__":
     ray.init(ignore_reinit_error=True, num_gpus=0, include_dashboard=False, log_to_driver=True,
              num_cpus=10, runtime_env={
@@ -330,12 +605,11 @@ if __name__ == "__main__":
             }
         })
 
+    env_type = CustomEnv.Environments.multi_room
+
     register_env("CustomPlaygroundCrossingEnv-v0",
                  lambda config:
                  RGBImgObsWrapper(CustomEnv(**config)))
-
-    env = RGBImgObsWrapper(CustomEnv(env_type=CustomEnv.Environments.crossing, ))
-    obs = env.reset()
 
     config = (
         PPOConfig()
@@ -345,7 +619,7 @@ if __name__ == "__main__":
             # entropy_coeff=0.02,
             # lambda_=0.95,
             # gamma=0.99,
-            train_batch_size_per_learner=2000,
+            train_batch_size_per_learner=1024,
             lr=0.0004,
             # num_epochs=10,
             # lr=0.00025,
@@ -359,8 +633,8 @@ if __name__ == "__main__":
             # kl_coeff=0.1,
             entropy_coeff=0.01,
             model={
-                "fcnet_hiddens": [512, 512],
-                "post_fcnet_hiddens": [512, 512],
+                "fcnet_hiddens": [1024, 1024],
+                "post_fcnet_hiddens": [1024, 1024],
                 "dim": 88,
                 "conv_filters": [
                     [16, [8, 8], 8],
@@ -392,6 +666,7 @@ if __name__ == "__main__":
         #     )
         # )
         .learners(
+            num_learners=2,
             num_gpus_per_learner=0,
         ).resources(
             num_gpus=0,
@@ -401,17 +676,16 @@ if __name__ == "__main__":
         )
         .environment(
             env="CustomPlaygroundCrossingEnv-v0",
-            observation_space=env.observation_space,
-            action_space=env.action_space,
             disable_env_checking=True,
             env_config={
-                "enable_dowham_reward_v2": True
-            }
+                "enable_dowham_reward_v2": True,
+                "env_type": env_type
+            },
         )
         .env_runners(
             num_env_runners=4,
-            num_envs_per_env_runner=1,
-            num_cpus_per_env_runner=0.5,
+            num_envs_per_env_runner=4,
+            num_cpus_per_env_runner=1,
             num_gpus_per_env_runner=0
         )
         .framework("torch")
@@ -440,32 +714,38 @@ if __name__ == "__main__":
         checkpoint_score_order="max"
     )
 
+    trails = [
+        {
+            **copy.deepcopy(config),
+            "env_config": {
+                "enable_dowham_reward_v2": True,
+                "env_type": env_type
+            },
+            "fcnet_activation": "tanh",
+            "post_fcnet_activation": "tanh"
+        },
+        {
+            **copy.deepcopy(config),
+            "env_config": {
+                "enable_dowham_reward_v2": False,
+                "env_type": env_type
+            },
+            "fcnet_activation": "relu",
+            "post_fcnet_activation": "relu"
+        }
+    ]
+    print(trails)
+
     trail = tune.run(
         "PPO",  # Specify the RLlib algorithm
         config=tune.grid_search(
-            [
-                {
-                    **config.copy(),
-                    "env_config": {
-                        "enable_dowham_reward_v2": True
-                    },
-                    "fcnet_activation": "tanh",
-                    "post_fcnet_activation": "tanh"
-                },
-                {
-                    **config.copy(),
-                    "env_config": {
-                        "enable_dowham_reward_v2": False,
-                    },
-                    "fcnet_activation": "relu",
-                    "post_fcnet_activation": "relu"
-                }
-            ]
+            trails
         ),
         stop={
-            "timesteps_total": 10_000_000,
+            "timesteps_total": 5_000_000,
         },
         checkpoint_config=checkpoint_config,
+        trial_name_creator=custom_trial_name,  # Custom trial name
         verbose=2,  # Display detailed logs
         num_samples=1,  # Only one trial
         log_to_file=True,
