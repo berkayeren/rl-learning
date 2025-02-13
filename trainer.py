@@ -764,7 +764,7 @@ if __name__ == "__main__":
             trails
         ),
         stop={
-            "timesteps_total": 5_000_000,
+            "timesteps_total": 10_000_000,
         },
         checkpoint_config=checkpoint_config,
         trial_name_creator=custom_trial_name,  # Custom trial name
