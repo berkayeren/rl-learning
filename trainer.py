@@ -24,6 +24,7 @@ from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
 from ray.rllib.utils.typing import EpisodeType, PolicyID
 from ray.tune import register_env, CheckpointConfig
+from ray.tune.search import BasicVariantGenerator
 
 from intrinsic_motivation.dowham_v2 import DoWhaMIntrinsicRewardV2
 
@@ -602,6 +603,9 @@ if __name__ == "__main__":
     parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
+    parser.add_argument('--run_mode', type=str, choices=['experiment', 'hyperparameter_search'], required=True,
+                        help='Specify whether to run an experiment or hyperparameter search')
+
     args = parser.parse_args()
 
     ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True,
@@ -758,19 +762,53 @@ if __name__ == "__main__":
         },
     ]
 
-    trail = tune.run(
-        "PPO",  # Specify the RLlib algorithm
-        config=tune.grid_search(
-            trails
-        ),
-        stop={
-            "timesteps_total": 10_000_000,
-        },
-        checkpoint_config=checkpoint_config,
-        trial_name_creator=custom_trial_name,  # Custom trial name
-        verbose=2,  # Display detailed logs
-        num_samples=1,  # Only one trial
-        log_to_file=True,
-        resume="AUTO",
-        max_failures=5
-    )
+    if args.run_mode == 'experiment':
+        trail = tune.run(
+            "PPO",  # Specify the RLlib algorithm
+            config=tune.grid_search(
+                trails
+            ),
+            stop={
+                "timesteps_total": 10_000_000,
+            },
+            checkpoint_config=checkpoint_config,
+            trial_name_creator=custom_trial_name,  # Custom trial name
+            verbose=2,  # Display detailed logs
+            num_samples=1,  # Only one trial
+            log_to_file=True,
+            resume="AUTO",
+            max_failures=5
+        )
+    elif args.run_mode == 'hyperparameter_search':
+        trail = tune.Tuner(
+            "PPO",  # Specify the RLlib algorithm
+            param_space={
+                **copy.deepcopy(config),
+                "env_config": {
+                    "enable_dowham_reward_v2": True,
+                    "env_type": env_type
+                },
+                "fcnet_activation": tune.grid_search(["tanh", "relu"]),  # Test different activations
+                "post_fcnet_activation": tune.grid_search(["tanh", "relu"]),
+                "lr": tune.loguniform(1e-5, 1e-3),  # Sample learning rate between 1e-5 and 1e-3
+                "grad_clip": tune.uniform(1.0, 5.0),  # Sample gradient clip values
+                "train_batch_size": tune.choice([512, 1024, 2048]),  # Try different batch sizes
+                "fcnet_hiddens": tune.choice([[256, 256], [512, 512], [1024, 1024]]),
+                "post_fcnet_hiddens": tune.choice([[256, 256], [512, 512], [1024, 1024]]),
+                "entropy_coeff": tune.loguniform(1e-3, 0.1),  # Balances exploration vs. exploitation
+                "vf_loss_coeff": tune.uniform(0.005, 0.05),  # Adjusts value function strength
+                "kl_coeff": tune.uniform(0.01, 0.2),
+                "clip_param": tune.uniform(0.1, 0.3),
+            },
+            tune_config=tune.TuneConfig(
+                metric="env_runners/episode_len_mean",  # Optimize for return
+                mode="min",  # Maximize reward
+                num_samples=10,  # Number of trials
+                search_alg=BasicVariantGenerator(),
+                # Use Bayesian optimization
+            ),
+        )
+
+        results = trail.fit()
+        best_trial = results.get_best_result(metric="env_runners/episode_len_mean", mode="min")
+        print("Best Hyperparameters:", best_trial.config)
