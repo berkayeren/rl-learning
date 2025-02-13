@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import copy
 import hashlib
 from enum import IntEnum
@@ -587,7 +588,7 @@ def custom_trial_name(trial):
     if enable_dowham_reward_v1:
         return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
     if enable_dowham_reward_v2:
-        return f"DoWhaMV2_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}"
+        return f"DoWhaMV2_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}{grad_clip}"
     elif enable_count_based:
         return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
     elif enable_rnd:
@@ -597,7 +598,13 @@ def custom_trial_name(trial):
 
 
 if __name__ == "__main__":
-    ray.init(ignore_reinit_error=True, num_gpus=0, include_dashboard=False, log_to_driver=True,
+    parser = argparse.ArgumentParser(description="Custom training script")
+    parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
+    parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
+    parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
+    args = parser.parse_args()
+
+    ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True,
              num_cpus=10, runtime_env={
             "env_vars": {
                 "RAY_DISABLE_WORKER_STARTUP_LOGS": "0",
@@ -667,13 +674,10 @@ if __name__ == "__main__":
         # )
         .learners(
             num_learners=2,
-            num_gpus_per_learner=0,
-        ).resources(
-            num_gpus=0,
+            num_gpus_per_learner=args.num_gpus / 6,
         )
         .experimental(
-            _disable_preprocessor_api=True,
-        )
+            _disable_preprocessor_api=True, )
         .environment(
             env="CustomPlaygroundCrossingEnv-v0",
             disable_env_checking=True,
@@ -683,8 +687,8 @@ if __name__ == "__main__":
             },
         )
         .env_runners(
-            num_env_runners=4,
-            num_envs_per_env_runner=4,
+            num_env_runners=args.num_rollout_workers,
+            num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=1,
             num_gpus_per_env_runner=0
         )
@@ -722,19 +726,37 @@ if __name__ == "__main__":
                 "env_type": env_type
             },
             "fcnet_activation": "tanh",
-            "post_fcnet_activation": "tanh"
+            "post_fcnet_activation": "tanh",
+            "lr": 0.0001,
+            "grad_clip": 2.0,
         },
         {
             **copy.deepcopy(config),
             "env_config": {
-                "enable_dowham_reward_v2": False,
+                "enable_dowham_reward_v2": True,
                 "env_type": env_type
             },
-            "fcnet_activation": "relu",
-            "post_fcnet_activation": "relu"
-        }
+            "fcnet_activation": "tanh",
+            "post_fcnet_activation": "tanh",
+            "lr": 0.0001,
+            "grad_clip": 2.0,
+            "fcnet_hiddens": [512, 512],
+            "post_fcnet_hiddens": [512, 512],
+        },
+        {
+            **copy.deepcopy(config),
+            "env_config": {
+                "enable_dowham_reward_v2": True,
+                "env_type": env_type
+            },
+            "fcnet_activation": "tanh",
+            "post_fcnet_activation": "tanh",
+            "lr": 0.0001,
+            "grad_clip": 2.0,
+            "fcnet_hiddens": [256, 256],
+            "post_fcnet_hiddens": [256, 256],
+        },
     ]
-    print(trails)
 
     trail = tune.run(
         "PPO",  # Specify the RLlib algorithm
