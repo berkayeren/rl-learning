@@ -15,7 +15,7 @@ from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
 from minigrid.wrappers import RGBImgObsWrapper
-from ray import tune
+from ray import tune, train
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import PPOConfig
 from ray.rllib.callbacks.callbacks import RLlibCallback
@@ -807,6 +807,7 @@ if __name__ == "__main__":
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
+            run_config=train.RunConfig(stop={"timesteps_total": 1_000_000}),
         )
 
         results = trail.fit()
