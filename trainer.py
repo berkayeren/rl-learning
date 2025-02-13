@@ -694,7 +694,7 @@ if __name__ == "__main__":
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=1,
-            num_gpus_per_env_runner=0
+            num_gpus_per_env_runner=args.num_gpus / 4,
         )
         .framework("torch")
         .debugging(
