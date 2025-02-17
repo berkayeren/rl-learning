@@ -730,18 +730,18 @@ if __name__ == "__main__":
         {
             **copy.deepcopy(config),
             "env_config": {
-                "enable_dowham_reward_v2": True,
-                "env_type": env_type
-            },
-        },
-        {
-            **copy.deepcopy(config),
-            "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type
             },
             "num_gpus_per_env_runner": 0,
-        }
+        },
+        {
+            **copy.deepcopy(config),
+            "env_config": {
+                "enable_dowham_reward_v2": True,
+                "env_type": env_type
+            },
+        },
     ]
 
     if args.run_mode == 'experiment':
