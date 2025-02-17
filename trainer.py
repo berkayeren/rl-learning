@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import copy
 import hashlib
 from enum import IntEnum
@@ -72,6 +73,7 @@ class CustomCallback(RLlibCallback):
         episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
         episode.custom_metrics["step_done"] = env.done
         episode.custom_metrics[env.actions(env.action).name] += 1
+        episode.custom_metrics["termination_reward"] = env.termination_reward
 
     def on_episode_created(
             self,
@@ -90,6 +92,7 @@ class CustomCallback(RLlibCallback):
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
         episode.custom_metrics["percentage_visited"] = env.percentage_visited
+        episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
 
 
 class CustomEnv(EmptyEnv):
@@ -107,18 +110,19 @@ class CustomEnv(EmptyEnv):
         done = 6
 
     def __init__(self, **kwargs):
-        print(f"Environment Config: {kwargs}")
-        self.env_type = kwargs.pop("env_type", CustomEnv.Environments.multi_room)
+        self.termination_reward = 0
+        self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
         print(f"Enable Dowham Reward V2: {self.enable_dowham_reward_v2}")
 
         self.percentage_visited = 0.0
+        self.percentage_history = collections.deque(maxlen=100)
         self.action = None
         self.reward_range = (0, 1)
         self.max_steps = 200
         self.dowham_reward = None
-        self.tile_size = 24
+        self.tile_size = 8
         self.highlight = False
 
         super().__init__(
@@ -192,7 +196,8 @@ class CustomEnv(EmptyEnv):
             self.intrinsic_reward *= 0.05
 
         if terminated:
-            reward = reward * 10
+            reward = 1
+            self.termination_reward = reward
         else:
             reward += self.intrinsic_reward
 
@@ -235,6 +240,8 @@ class CustomEnv(EmptyEnv):
     def crossing_env(self, width, height):
         import itertools as itt
         assert width % 2 == 1 and height % 2 == 1  # odd size
+        self.obstacle_type = Wall
+        self.num_crossings = 1
 
         # Create an empty grid
         self.grid = Grid(width, height)
@@ -554,12 +561,19 @@ class CustomEnv(EmptyEnv):
 
         # Calculate the percentage of the environment the agent has visited
         self.percentage_visited = (unique_states_visited / total_size) * 100
+        self.percentage_history.append(self.done)
+
+        # if len(self.percentage_history) == 100 and self.percentage_history.count(
+        #         True) >= 90 and self.env_type != CustomEnv.Environments.multi_room:
+        #     self.env_type = (self.env_type + 1) % len(CustomEnv.Environments)
+        #     print(f"Environment Type Changed to: {CustomEnv.Environments(self.env_type).name}")
 
         self.states = np.full((self.width, self.height), 0)
         self.agent_pos = (1, 1)
         self.agent_dir = 0
         obs, _ = super().reset(**kwargs)
         self.intrinsic_reward = 0
+        self.termination_reward = 0
         self.done = False
         return obs, {}
 
@@ -625,58 +639,45 @@ if __name__ == "__main__":
     config = (
         PPOConfig()
         .training(
+            gamma=0.99,  # Discount factor
+            lr=0.0008679592813302736,  # Learning rate
+            grad_clip=4.488759919509276,  # Gradient clipping
+            grad_clip_by="global_norm",
+            train_batch_size=512,  # Training batch size
+            num_epochs=30,  # Number of training epochs
+            minibatch_size=128,  # Mini-batch size for SGD
+            shuffle_batch_per_epoch=True,
             use_critic=True,
-            # use_gae=True,
-            # entropy_coeff=0.02,
-            # lambda_=0.95,
-            # gamma=0.99,
-            train_batch_size_per_learner=1024,
-            lr=0.0004,
-            # num_epochs=10,
-            # lr=0.00025,
-            # clip_param=0.2,
-            grad_clip=5.0,
-            vf_loss_coeff=0.01,
-            # use_gae=True,
-            # gamma=0.99,
-            # lambda_=0.98,
-            # kl_target=0.02,
-            # kl_coeff=0.1,
-            entropy_coeff=0.01,
+            use_gae=True,  # Generalized Advantage Estimation
+            use_kl_loss=True,
+            kl_coeff=0.16108743826129673,  # KL divergence coefficient
+            kl_target=0.01,  # Target KL divergence
+            vf_loss_coeff=0.02633906005324078,  # Value function loss coefficient
+            entropy_coeff=0.010644976474839299,  # Entropy coefficient for exploration
+            clip_param=0.25759466534505526,  # PPO clipping parameter
+            vf_clip_param=10.0,  # Clipping for value function updates
             model={
                 "fcnet_hiddens": [1024, 1024],
-                "post_fcnet_hiddens": [1024, 1024],
-                "dim": 88,
+                "fcnet_activation": "tanh",
+                "post_fcnet_hiddens": [512, 512],
+                "post_fcnet_activation": "tanh",
                 "conv_filters": [
-                    [16, [8, 8], 8],
-                    [128, [9, 9], 1],
+                    [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
+                    [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
                 ],
+                # "conv_filters": [
+                #     [16, [8, 8], 4],
+                #     [32, [4, 4], 2],
+                #     [256, [11, 11], 1],
+                # ],
+                "conv_activation": "relu",
                 "vf_share_layers": False,
-            },
-        )
-        # .rl_module(
-        #     model_config={
-        #         "fcnet_hiddens": [256, 256],
-        #         # "conv_filters": None,
-        #         "conv_filters": [
-        #             [16, [3, 3], 1],
-        #             [32, [3, 3], 1],
-        #             [64, [3, 3], 1],
-        #         ],
-        #         "vf_share_layers": False, },
-        #     rl_module_spec=DefaultPPOTorchRLModule(
-        #         observation_space=env.observation_space,
-        #         action_space=env.action_space,
-        #         model_config=DefaultModelConfig(fcnet_hiddens=[64, 64]),
-        #         catalog_class=PPOCatalog(observation_space=env.observation_space, action_space=env.action_space,
-        #                                  model_config_dict={
-        #                                      "vf_share_layers": False,
-        #                                      "head_fcnet_hiddens": [64, 64],
-        #                                      "head_fcnet_activation": "relu",
-        #                                  }),
-        #     )
-        # )
-        .learners(
+                "framestack": True,
+                "dim": 84,  # Resized observation dimension
+                "grayscale": False,
+                "zero_mean": True,
+            }
+        ).learners(
             num_learners=2,
             num_gpus_per_learner=args.num_gpus / 6,
         )
@@ -684,17 +685,20 @@ if __name__ == "__main__":
             _disable_preprocessor_api=True, )
         .environment(
             env="CustomPlaygroundCrossingEnv-v0",
-            disable_env_checking=True,
             env_config={
                 "enable_dowham_reward_v2": True,
                 "env_type": env_type
             },
+            disable_env_checking=True,
+            normalize_actions=True,
+            clip_actions=False,
         )
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=1,
+            num_cpus_per_env_runner=0.5,
             num_gpus_per_env_runner=args.num_gpus / 6,
+            batch_mode="complete_episodes",
         )
         .framework("torch")
         .debugging(
@@ -729,37 +733,14 @@ if __name__ == "__main__":
                 "enable_dowham_reward_v2": True,
                 "env_type": env_type
             },
-            "fcnet_activation": "tanh",
-            "post_fcnet_activation": "tanh",
-            "lr": 0.0001,
-            "grad_clip": 2.0,
         },
         {
             **copy.deepcopy(config),
             "env_config": {
-                "enable_dowham_reward_v2": True,
+                "enable_dowham_reward_v2": False,
                 "env_type": env_type
             },
-            "fcnet_activation": "tanh",
-            "post_fcnet_activation": "tanh",
-            "lr": 0.0001,
-            "grad_clip": 2.0,
-            "fcnet_hiddens": [512, 512],
-            "post_fcnet_hiddens": [512, 512],
-        },
-        {
-            **copy.deepcopy(config),
-            "env_config": {
-                "enable_dowham_reward_v2": True,
-                "env_type": env_type
-            },
-            "fcnet_activation": "tanh",
-            "post_fcnet_activation": "tanh",
-            "lr": 0.0001,
-            "grad_clip": 2.0,
-            "fcnet_hiddens": [256, 256],
-            "post_fcnet_hiddens": [256, 256],
-        },
+        }
     ]
 
     if args.run_mode == 'experiment':
@@ -788,13 +769,7 @@ if __name__ == "__main__":
                     "enable_dowham_reward_v2": True,
                     "env_type": env_type
                 },
-                "fcnet_activation": tune.grid_search(["tanh", "relu"]),  # Test different activations
-                "post_fcnet_activation": tune.grid_search(["tanh", "relu"]),
-                "lr": tune.loguniform(1e-5, 1e-3),  # Sample learning rate between 1e-5 and 1e-3
                 "grad_clip": tune.uniform(1.0, 5.0),  # Sample gradient clip values
-                "train_batch_size": tune.choice([512, 1024, 2048]),  # Try different batch sizes
-                "fcnet_hiddens": tune.choice([[256, 256], [512, 512], [1024, 1024]]),
-                "post_fcnet_hiddens": tune.choice([[256, 256], [512, 512], [1024, 1024]]),
                 "entropy_coeff": tune.loguniform(1e-3, 0.1),  # Balances exploration vs. exploitation
                 "vf_loss_coeff": tune.uniform(0.005, 0.05),  # Adjusts value function strength
                 "kl_coeff": tune.uniform(0.01, 0.2),

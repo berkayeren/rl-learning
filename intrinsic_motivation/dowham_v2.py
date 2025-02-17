@@ -151,31 +151,15 @@ class DoWhaMIntrinsicRewardV2:
         state_count = self.state_visit_counts[obs]
         action_bonus = self.calculate_bonus(obs, action)
         intrinsic_reward = action_bonus / np.sqrt(state_count)
-        reward = overexploration_penalty = 0.0
+        reward = 0.0
 
         if state_changed:
             reward = intrinsic_reward
-        elif self.action_state[obs][action].count(False) > 2:
-            left = self.calculate_bonus(obs, 0) / np.sqrt(state_count)
-            right = self.calculate_bonus(obs, 1) / np.sqrt(state_count)
-            forward = self.calculate_bonus(obs, 2) / np.sqrt(state_count)
-            pickup = self.calculate_bonus(obs, 3) / np.sqrt(state_count)
-            drop = self.calculate_bonus(obs, 4) / np.sqrt(state_count)
-            toggle = self.calculate_bonus(obs, 5) / np.sqrt(state_count)
-            done = self.calculate_bonus(obs, 6) / np.sqrt(state_count)
-
-            penalty = max(left, right, forward, pickup, drop, toggle, done)
-            # print(
-            #     f"Selected Action: {action} | Left: {left}, Right: {right}, Forward: {forward}, Pickup: {pickup}, Drop: {drop}, Toggle: {toggle}, Done: {done}")
-
+        elif self.action_state[obs][action].count(False) > 1:
+            penalty = 1 - (1 / (self.action_state[obs][action].count(False) / np.sqrt(state_count)))
             reward = max(-penalty, -1.0)  # Cap the penalty at -1.0
 
-        # print(
-        #     f"Transition: {transition}, Reward: {reward}, IsReward: {is_reward_available}, State Count: {state_count}, Action Bonus: {action_bonus}: Action: {Actions(action).name}")
-
-        # print(
-        #     f"Reward:{reward}, {overexploration_penalty}, State Count: {state_count}/{self.action_state[obs][action].count(False)}, Action Bonus: {action_bonus}: Action: {Actions(action).name}")
-        return round(reward, 3)
+        return round(reward, 5)
 
     def reset_episode(self):
         self.state_visit_counts.clear()
