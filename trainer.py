@@ -740,6 +740,7 @@ if __name__ == "__main__":
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type
             },
+            "num_gpus_per_env_runner": 0,
         }
     ]
 
