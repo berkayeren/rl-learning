@@ -146,9 +146,11 @@ class DoWhaMIntrinsicRewardV2:
 
         self.action_state[obs][action].append(state_changed)
 
-    def calculate_intrinsic_reward(self, obs, action, next_obs, state_changed):
+    def calculate_intrinsic_reward(self, obs, action, prev_pos, state_changed):
         # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
-        state_count = self.state_visit_counts[obs]
+        is_recent = (obs, action) in self.recent_transitions
+        self.recent_transitions.append((obs, action))
+        state_count = self.state_visit_counts[prev_pos]
         action_bonus = self.calculate_bonus(obs, action)
         intrinsic_reward = action_bonus / np.sqrt(state_count)
         reward = 0.0
@@ -157,11 +159,13 @@ class DoWhaMIntrinsicRewardV2:
             reward = intrinsic_reward
         elif self.action_state[obs][action].count(False) > 1:
             penalty = 1 - (1 / (self.action_state[obs][action].count(False) / np.sqrt(state_count)))
-            reward = max(-penalty, -1.0)  # Cap the penalty at -1.0
+            reward = max(-abs(penalty), -1.0)  # Cap the penalty at -1.0
 
         return round(reward, 5)
 
     def reset_episode(self):
         self.state_visit_counts.clear()
+        # self.usage_counts.clear()
+        # self.effectiveness_counts.clear()
         self.recent_transitions.clear()
         self.action_state.clear()

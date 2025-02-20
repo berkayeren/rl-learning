@@ -11,11 +11,12 @@ import gymnasium as gym
 import numpy as np
 import ray
 from gymnasium import spaces
+from matplotlib import pyplot as plt
 from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper, FlatObsWrapper
 from ray import tune, train
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import PPOConfig
@@ -31,6 +32,8 @@ from intrinsic_motivation.dowham_v2 import DoWhaMIntrinsicRewardV2
 
 
 class CustomCallback(RLlibCallback):
+    counter = 1
+
     def on_episode_start(
             self,
             *,
@@ -93,6 +96,54 @@ class CustomCallback(RLlibCallback):
         env = base_env.get_sub_environments()[env_index].unwrapped
         episode.custom_metrics["percentage_visited"] = env.percentage_visited
         episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
+        self.counter += 1
+
+        if self.counter % 1000 == 0:
+            plot_heatmap(env, f"heat_map{self.counter}.png")
+            env.states = np.full((env.width, env.height), 0)
+
+
+def plot_heatmap(env, filename="visit_heatmap.png"):
+    """
+    Plots a heatmap of agent visits, overlaying walls and the goal position.
+    """
+    heatmap_data = np.flipud(env.states.T)  # Flip for correct orientation
+
+    plt.figure(figsize=(6, 6))
+    plt.title("Agent Visit Heatmap")
+
+    # Plot heatmap with visit counts
+    plt.imshow(heatmap_data, cmap="hot", origin="lower", alpha=0.5)  # Heatmap semi-transparent
+
+    for x in range(env.width):
+        for y in range(env.height):
+            count = env.states[x, y]
+            if count > 0:  # Only show counts for visited cells
+                plt.text(x, env.height - y - 1, str(count), ha='center', va='center', color='white', fontsize=8)
+
+    # Overlay walls in black
+    for x in range(env.width):
+        for y in range(env.height):
+            if isinstance(env.grid.get(x, y), Wall):  # Check if cell is a wall
+                plt.scatter(x, env.height - y - 1, color='black', s=40, marker='s')
+            if isinstance(env.grid.get(x, y), Door):  # Check if cell is a wall
+                plt.scatter(x, env.height - y - 1, color="yellow", s=80, marker='D', edgecolors="black",
+                            linewidth=1.2)
+
+    # Overlay goal position in green
+    if hasattr(env, "goal_pos") and env.goal_pos:
+        goal_x, goal_y = env.goal_pos
+        plt.scatter(goal_x, env.height - goal_y - 1, color='lime', s=100, marker='*', edgecolors="black", linewidth=1.5)
+
+    # Add colorbar
+    plt.colorbar(label="Visit Count")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.grid(False)
+
+    # Save the image
+    plt.savefig(filename)
+    plt.close()
 
 
 class CustomEnv(EmptyEnv):
@@ -114,21 +165,23 @@ class CustomEnv(EmptyEnv):
         self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
+        self.direction_obs = kwargs.pop('direction_obs', True)
+        self.max_steps = kwargs.pop('max_steps', 200)
         print(f"Enable Dowham Reward V2: {self.enable_dowham_reward_v2}")
 
         self.percentage_visited = 0.0
         self.percentage_history = collections.deque(maxlen=100)
         self.action = None
         self.reward_range = (0, 1)
-        self.max_steps = 200
         self.dowham_reward = None
         self.tile_size = 8
         self.highlight = False
 
         super().__init__(
-            size=11,
+            size=19,
             tile_size=self.tile_size,
             highlight=self.highlight,
+            max_steps=self.max_steps,
             **kwargs)
 
         self.states = np.full((self.width, self.height), 0)
@@ -172,25 +225,27 @@ class CustomEnv(EmptyEnv):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action = action
         current_obs = self.img_observation()
+        prev_pos = self.agent_pos
         obs, reward, terminated, truncated, _ = super().step(action)
         next_obs = self.img_observation()
+        next_pos = self.agent_pos
 
         if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
-            self.dowham_reward.update_state_visits(current_obs, next_obs)
+            self.dowham_reward.update_state_visits(prev_pos, next_pos)
             state_changed = current_obs != next_obs
-            self.dowham_reward.update_usage(current_obs, action)
+            self.dowham_reward.update_usage(prev_pos, action)
 
             self.dowham_reward.update_effectiveness(
-                current_obs,
+                prev_pos,
                 action,
-                next_obs,
+                next_pos,
                 state_changed
             )
 
             self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
-                current_obs,
+                prev_pos,
                 action,
-                next_obs,
+                next_pos,
                 state_changed
             )
             self.intrinsic_reward *= 0.05
@@ -215,9 +270,17 @@ class CustomEnv(EmptyEnv):
             self.multi_room(width, height)
 
     def img_observation(self, size=32):
-        rgb_img = self.get_frame(
-            highlight=self.highlight, tile_size=self.tile_size
-        )
+        if self.direction_obs:
+            rgb_img = self.get_frame(
+                highlight=self.highlight, tile_size=self.tile_size
+            )
+        else:
+            agent_dir = self.agent_dir
+            self.agent_dir = 0
+            rgb_img = self.get_frame(
+                highlight=self.highlight, tile_size=self.tile_size
+            )
+            self.agent_dir = agent_dir
 
         sample_hash = hashlib.sha256()
 
@@ -376,6 +439,36 @@ class CustomEnv(EmptyEnv):
             self.place_obj(Goal())
 
     def multi_room(self, width, height):
+        """
+        Example of a 19×19 fixed, maze-like layout with several 'yellow' doors
+        and a goal in the lower corridor.
+        """
+        # Force the grid size to 19×19.
+        width = 19
+        height = 19
+        self.grid = Grid(width, height)
+
+        # 1) Surrounding outer walls
+        self.grid.wall_rect(1, 0, 5, 7)
+        self.grid.wall_rect(0, 6, 7, 5)
+        self.grid.wall_rect(6, 8, 9, 5)
+        self.grid.wall_rect(14, 8, 5, 11)
+        self.grid.set(3, 6, Door(color="yellow", is_open=False))
+        self.grid.set(6, 9, Door(color="yellow", is_open=False))
+        self.grid.set(14, 10, Door(color="yellow", is_open=False))
+        # ----------------------------------------------------------------------
+        # 4) Agent start in the top-left corridor
+        # ----------------------------------------------------------------------
+        self.agent_pos = (2, 1)
+        self.agent_dir = 0  # facing right
+
+        # ----------------------------------------------------------------------
+        # 5) Goal in the lower corridor (the green square)
+        # ----------------------------------------------------------------------
+        self.put_obj(Goal(), 17, 17)
+        self.goal_pos = (17, 17)
+
+    def _multi_room(self, width, height):
         self.minNumRooms = 2
         self.maxNumRooms = 2
         self.maxRoomSize = 9
@@ -563,13 +656,19 @@ class CustomEnv(EmptyEnv):
         self.percentage_visited = (unique_states_visited / total_size) * 100
         self.percentage_history.append(self.done)
 
+        if self.enable_dowham_reward_v2:
+            self.dowham_reward.reset_episode()
+
         # if len(self.percentage_history) == 100 and self.percentage_history.count(
         #         True) >= 90 and self.env_type != CustomEnv.Environments.multi_room:
         #     self.env_type = (self.env_type + 1) % len(CustomEnv.Environments)
         #     print(f"Environment Type Changed to: {CustomEnv.Environments(self.env_type).name}")
 
-        self.states = np.full((self.width, self.height), 0)
-        self.agent_pos = (1, 1)
+        if self.env_type == CustomEnv.Environments.multi_room:
+            self.agent_pos = (2, 1)
+        else:
+            self.agent_pos = (1, 1)
+
         self.agent_dir = 0
         obs, _ = super().reset(**kwargs)
         self.intrinsic_reward = 0
@@ -643,7 +742,7 @@ if __name__ == "__main__":
             lr=0.0008679592813302736,  # Learning rate
             grad_clip=4.488759919509276,  # Gradient clipping
             grad_clip_by="global_norm",
-            train_batch_size=512,  # Training batch size
+            train_batch_size=128,  # Training batch size
             num_epochs=30,  # Number of training epochs
             minibatch_size=128,  # Mini-batch size for SGD
             shuffle_batch_per_epoch=True,
@@ -653,9 +752,12 @@ if __name__ == "__main__":
             kl_coeff=0.16108743826129673,  # KL divergence coefficient
             kl_target=0.01,  # Target KL divergence
             vf_loss_coeff=0.02633906005324078,  # Value function loss coefficient
-            entropy_coeff=0.010644976474839299,  # Entropy coefficient for exploration
+            entropy_coeff=0.1,  # Entropy coefficient for exploration
             clip_param=0.25759466534505526,  # PPO clipping parameter
             vf_clip_param=10.0,  # Clipping for value function updates
+            optimizer={
+                "type": "RMSProp",
+            },
             model={
                 "fcnet_hiddens": [1024, 1024],
                 "fcnet_activation": "tanh",
@@ -708,7 +810,7 @@ if __name__ == "__main__":
             enable_env_runner_and_connector_v2=False,
         ).callbacks(CustomCallback)
         .evaluation(
-            evaluation_interval=5,
+            evaluation_interval=20,
             evaluation_duration=10,
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,
@@ -730,16 +832,9 @@ if __name__ == "__main__":
         {
             **copy.deepcopy(config),
             "env_config": {
-                "enable_dowham_reward_v2": False,
-                "env_type": env_type
-            },
-            "num_gpus_per_env_runner": 0,
-        },
-        {
-            **copy.deepcopy(config),
-            "env_config": {
                 "enable_dowham_reward_v2": True,
-                "env_type": env_type
+                "env_type": env_type,
+                "max_steps": 400,
             },
         },
     ]
