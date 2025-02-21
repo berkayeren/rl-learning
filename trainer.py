@@ -846,7 +846,7 @@ if __name__ == "__main__":
                 "use_lstm": False,
             }
         ).learners(
-            num_learners=2,
+            num_learners=1,
             num_gpus_per_learner=args.num_gpus / 8,
         )
         .experimental(
