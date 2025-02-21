@@ -16,10 +16,10 @@ from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper, FlatObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper
 from ray import tune, train
 from ray.rllib import BaseEnv, Policy
-from ray.rllib.algorithms import PPOConfig
+from ray.rllib.algorithms import ImpalaConfig
 from ray.rllib.callbacks.callbacks import RLlibCallback
 from ray.rllib.core.rl_module import RLModule
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
@@ -97,10 +97,11 @@ class CustomCallback(RLlibCallback):
         episode.custom_metrics["percentage_visited"] = env.percentage_visited
         episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
         self.counter += 1
+        env.states = np.full((env.width, env.height), 0)
 
-        if self.counter % 1000 == 0:
-            plot_heatmap(env, f"heat_map{self.counter}.png")
-            env.states = np.full((env.width, env.height), 0)
+        # if self.counter % 1 == 0:
+        #     plot_heatmap(env, f"heat_map{self.counter}.png")
+        #     env.states = np.full((env.width, env.height), 0)
 
 
 def plot_heatmap(env, filename="visit_heatmap.png"):
@@ -708,7 +709,7 @@ def custom_trial_name(trial):
     elif enable_rnd:
         return f"RND_batch{train_batch_size}{fc}{grad_clip}"
     else:
-        return f"Default_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}"
+        return f"Default_batch"
 
 
 if __name__ == "__main__":
@@ -735,26 +736,95 @@ if __name__ == "__main__":
                  lambda config:
                  RGBImgObsWrapper(CustomEnv(**config)))
 
+    # config = (
+    #     PPOConfig()
+    #     .training(
+    #         gamma=0.99,  # Discount factor
+    #         lr=0.0008679592813302736,  # Learning rate
+    #         grad_clip=4.488759919509276,  # Gradient clipping
+    #         grad_clip_by="global_norm",
+    #         train_batch_size=128,  # Training batch size
+    #         num_epochs=30,  # Number of training epochs
+    #         minibatch_size=128,  # Mini-batch size for SGD
+    #         shuffle_batch_per_epoch=True,
+    #         use_critic=True,
+    #         use_gae=True,  # Generalized Advantage Estimation
+    #         use_kl_loss=True,
+    #         kl_coeff=0.16108743826129673,  # KL divergence coefficient
+    #         kl_target=0.01,  # Target KL divergence
+    #         vf_loss_coeff=0.02633906005324078,  # Value function loss coefficient
+    #         entropy_coeff=0.1,  # Entropy coefficient for exploration
+    #         clip_param=0.25759466534505526,  # PPO clipping parameter
+    #         vf_clip_param=10.0,  # Clipping for value function updates
+    #         optimizer={
+    #             "type": "RMSProp",
+    #         },
+    #         model={
+    #             "fcnet_hiddens": [1024, 1024],
+    #             "fcnet_activation": "tanh",
+    #             "post_fcnet_hiddens": [512, 512],
+    #             "post_fcnet_activation": "tanh",
+    #             "conv_filters": [
+    #                 [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
+    #                 [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
+    #             ],
+    #             # "conv_filters": [
+    #             #     [16, [8, 8], 4],
+    #             #     [32, [4, 4], 2],
+    #             #     [256, [11, 11], 1],
+    #             # ],
+    #             "conv_activation": "relu",
+    #             "vf_share_layers": False,
+    #             "framestack": True,
+    #             "dim": 84,  # Resized observation dimension
+    #             "grayscale": False,
+    #             "zero_mean": True,
+    #         }
+    #     ).learners(
+    #         num_learners=2,
+    #         num_gpus_per_learner=args.num_gpus / 6,
+    #     )
+    #     .experimental(
+    #         _disable_preprocessor_api=True, )
+    #     .environment(
+    #         env="CustomPlaygroundCrossingEnv-v0",
+    #         env_config={
+    #             "enable_dowham_reward_v2": True,
+    #             "env_type": env_type
+    #         },
+    #         disable_env_checking=True,
+    #         normalize_actions=True,
+    #         clip_actions=False,
+    #     )
+    #     .env_runners(
+    #         num_env_runners=args.num_rollout_workers,
+    #         num_envs_per_env_runner=args.num_envs_per_worker,
+    #         num_cpus_per_env_runner=0.5,
+    #         num_gpus_per_env_runner=args.num_gpus / 6,
+    #         batch_mode="complete_episodes",
+    #     )
+    #     .framework("torch")
+    #     .debugging(
+    #         fake_sampler=False,
+    #     ).api_stack(
+    #         enable_rl_module_and_learner=False,
+    #         enable_env_runner_and_connector_v2=False,
+    #     ).callbacks(CustomCallback)
+    #     .evaluation(
+    #         evaluation_interval=20,
+    #         evaluation_duration=10,
+    #         evaluation_duration_unit="episodes",
+    #         evaluation_parallel_to_training=False,
+    #         evaluation_sample_timeout_s=120,
+    #     )
+    # )
     config = (
-        PPOConfig()
+        ImpalaConfig()
         .training(
             gamma=0.99,  # Discount factor
-            lr=0.0008679592813302736,  # Learning rate
-            grad_clip=4.488759919509276,  # Gradient clipping
-            grad_clip_by="global_norm",
-            train_batch_size=128,  # Training batch size
-            num_epochs=30,  # Number of training epochs
-            minibatch_size=128,  # Mini-batch size for SGD
-            shuffle_batch_per_epoch=True,
-            use_critic=True,
-            use_gae=True,  # Generalized Advantage Estimation
-            use_kl_loss=True,
-            kl_coeff=0.16108743826129673,  # KL divergence coefficient
-            kl_target=0.01,  # Target KL divergence
-            vf_loss_coeff=0.02633906005324078,  # Value function loss coefficient
-            entropy_coeff=0.1,  # Entropy coefficient for exploration
-            clip_param=0.25759466534505526,  # PPO clipping parameter
-            vf_clip_param=10.0,  # Clipping for value function updates
+            lr=1e-5,  # Learning rate
+            train_batch_size=32,  # Training batch size
+            grad_clip=40,
             optimizer={
                 "type": "RMSProp",
             },
@@ -767,17 +837,13 @@ if __name__ == "__main__":
                     [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
                     [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
                 ],
-                # "conv_filters": [
-                #     [16, [8, 8], 4],
-                #     [32, [4, 4], 2],
-                #     [256, [11, 11], 1],
-                # ],
                 "conv_activation": "relu",
                 "vf_share_layers": False,
                 "framestack": True,
                 "dim": 84,  # Resized observation dimension
                 "grayscale": False,
                 "zero_mean": True,
+                "use_lstm": False,
             }
         ).learners(
             num_learners=2,
@@ -788,21 +854,23 @@ if __name__ == "__main__":
         .environment(
             env="CustomPlaygroundCrossingEnv-v0",
             env_config={
-                "enable_dowham_reward_v2": True,
+                "enable_dowham_reward_v2": False,
                 "env_type": env_type
             },
             disable_env_checking=True,
-            normalize_actions=True,
             clip_actions=False,
         )
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=0.5,
-            num_gpus_per_env_runner=args.num_gpus / 6,
+            num_gpus_per_env_runner=0.1,
             batch_mode="complete_episodes",
+            rollout_fragment_length=32
         )
-        .framework("torch")
+        .framework("torch").resources(
+            num_gpus=args.num_gpus
+        )
         .debugging(
             fake_sampler=False,
         ).api_stack(
@@ -824,8 +892,8 @@ if __name__ == "__main__":
         num_to_keep=5,
         checkpoint_frequency=5,
         checkpoint_at_end=True,
-        checkpoint_score_attribute="evaluation/env_runners/episode_return_mean",
-        checkpoint_score_order="max"
+        checkpoint_score_attribute="env_runners/episode_len_mean",
+        checkpoint_score_order="min"
     )
 
     trails = [
@@ -858,23 +926,22 @@ if __name__ == "__main__":
         )
     elif args.run_mode == 'hyperparameter_search':
         trail = tune.Tuner(
-            "PPO",  # Specify the RLlib algorithm
+            "IMPALA",  # Specify the RLlib algorithm
             param_space={
                 **copy.deepcopy(config),
                 "env_config": {
-                    "enable_dowham_reward_v2": True,
-                    "env_type": env_type
+                    "enable_dowham_reward_v2": False,
+                    "env_type": env_type,
+                    "max_steps": 500,
                 },
-                "grad_clip": tune.uniform(1.0, 5.0),  # Sample gradient clip values
-                "entropy_coeff": tune.loguniform(1e-3, 0.1),  # Balances exploration vs. exploitation
-                "vf_loss_coeff": tune.uniform(0.005, 0.05),  # Adjusts value function strength
-                "kl_coeff": tune.uniform(0.01, 0.2),
-                "clip_param": tune.uniform(0.1, 0.3),
+                "vf_loss_coeff": tune.grid_search([1, 0.5, 0.01]),  # Adjusts value function strength
+                "entropy_coeff": tune.grid_search([0.1, 0.01, 0.001, 0.0001]),  # Adjusts value function strength
+                "grad_clip": tune.uniform(10, 100)
             },
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
                 mode="min",  # Maximize reward
-                num_samples=10,  # Number of trials
+                num_samples=1,  # Number of trials
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
