@@ -97,7 +97,6 @@ class CustomCallback(RLlibCallback):
         episode.custom_metrics["percentage_visited"] = env.percentage_visited
         episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
         self.counter += 1
-        env.states = np.full((env.width, env.height), 0)
 
         # if self.counter % 1 == 0:
         #     plot_heatmap(env, f"heat_map{self.counter}.png")
@@ -656,6 +655,7 @@ class CustomEnv(EmptyEnv):
         # Calculate the percentage of the environment the agent has visited
         self.percentage_visited = (unique_states_visited / total_size) * 100
         self.percentage_history.append(self.done)
+        self.states = np.full((self.width, self.height), 0)
 
         if self.enable_dowham_reward_v2:
             self.dowham_reward.reset_episode()
