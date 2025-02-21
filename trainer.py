@@ -847,7 +847,7 @@ if __name__ == "__main__":
             }
         ).learners(
             num_learners=1,
-            num_gpus_per_learner=args.num_gpus / 10,
+            num_gpus_per_learner=0,
         )
         .experimental(
             _disable_preprocessor_api=True, )
