@@ -828,6 +828,7 @@ if __name__ == "__main__":
             optimizer={
                 "type": "RMSProp",
             },
+            opt_type="RMSProp",
             model={
                 "fcnet_hiddens": [1024, 1024],
                 "fcnet_activation": "tanh",
@@ -941,11 +942,11 @@ if __name__ == "__main__":
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
                 mode="min",  # Maximize reward
-                num_samples=1,  # Number of trials
+                num_samples=3,  # Number of trials
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
-            run_config=train.RunConfig(stop={"timesteps_total": 1_000_000}),
+            run_config=train.RunConfig(stop={"timesteps_total": 5_000_000}),
         )
 
         results = trail.fit()
