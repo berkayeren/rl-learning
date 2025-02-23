@@ -829,9 +829,10 @@ if __name__ == "__main__":
                 "type": "RMSProp",
             },
             opt_type="RMSProp",
+            epsilon=0.01,
             model={
                 "fcnet_hiddens": [1024, 1024],
-                "fcnet_activation": "tanh",
+                "fcnet_activation": "relu",
                 "post_fcnet_hiddens": [512, 512],
                 "post_fcnet_activation": "tanh",
                 "conv_filters": [
@@ -848,7 +849,7 @@ if __name__ == "__main__":
             }
         ).learners(
             num_learners=1,
-            num_gpus_per_learner=0,
+            num_gpus_per_learner=args.num_gpus / args.num_rollout_workers,
         )
         .experimental(
             _disable_preprocessor_api=True, )
@@ -865,7 +866,7 @@ if __name__ == "__main__":
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=0.5,
-            num_gpus_per_env_runner=args.num_gpus / 10,
+            num_gpus_per_env_runner=0,
             batch_mode="complete_episodes",
             rollout_fragment_length=32
         )
