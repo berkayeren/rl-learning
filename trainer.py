@@ -910,7 +910,7 @@ if __name__ == "__main__":
 
     if args.run_mode == 'experiment':
         trail = tune.run(
-            "PPO",  # Specify the RLlib algorithm
+            "IMPALA",  # Specify the RLlib algorithm
             config=tune.grid_search(
                 trails
             ),
@@ -933,20 +933,19 @@ if __name__ == "__main__":
                 "env_config": {
                     "enable_dowham_reward_v2": False,
                     "env_type": env_type,
-                    "max_steps": 500,
+                    "max_steps": 600,
                 },
                 "vf_loss_coeff": tune.grid_search([1, 0.5, 0.01]),  # Adjusts value function strength
                 "entropy_coeff": tune.grid_search([0.1, 0.01, 0.001, 0.0001]),  # Adjusts value function strength
-                "grad_clip": tune.uniform(10, 100)
             },
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
                 mode="min",  # Maximize reward
-                num_samples=3,  # Number of trials
+                num_samples=1,  # Number of trials
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
-            run_config=train.RunConfig(stop={"timesteps_total": 5_000_000}),
+            run_config=train.RunConfig(stop={"timesteps_total": 10_000_000}),
         )
 
         results = trail.fit()
