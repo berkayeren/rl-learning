@@ -936,8 +936,8 @@ if __name__ == "__main__":
                     "env_type": env_type,
                     "max_steps": 600,
                 },
-                "vf_loss_coeff": tune.grid_search([1, 0.5, 0.01]),  # Adjusts value function strength
-                "entropy_coeff": tune.grid_search([0.1, 0.01, 0.001, 0.0001]),  # Adjusts value function strength
+                "vf_loss_coeff": tune.grid_search([0.5, 0.01]),  # Adjusts value function strength
+                "entropy_coeff": tune.grid_search([0.01, 0.001, 0.0001]),  # Adjusts value function strength
             },
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
