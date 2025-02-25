@@ -830,6 +830,8 @@ if __name__ == "__main__":
             },
             opt_type="RMSProp",
             epsilon=0.01,
+            vf_loss_coeff=0.5,
+            entropy_coeff=0.0001,
             model={
                 "fcnet_hiddens": [1024, 1024],
                 "fcnet_activation": "relu",
@@ -934,19 +936,19 @@ if __name__ == "__main__":
                 "env_config": {
                     "enable_dowham_reward_v2": False,
                     "env_type": env_type,
-                    "max_steps": 600,
+                    "max_steps": 800,
                 },
-                "vf_loss_coeff": tune.grid_search([0.5, 0.01]),  # Adjusts value function strength
-                "entropy_coeff": tune.grid_search([0.01, 0.001, 0.0001]),  # Adjusts value function strength
             },
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
                 mode="min",  # Maximize reward
-                num_samples=1,  # Number of trials
+                num_samples=6,  # Number of trials,
+                reuse_actors=True,
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
-            run_config=train.RunConfig(stop={"timesteps_total": 10_000_000}),
+            run_config=train.RunConfig(stop={"timesteps_total": 10_000_000},
+                                       failure_config=FailureConfig(max_failures=-1)),
         )
 
         results = trail.fit()
