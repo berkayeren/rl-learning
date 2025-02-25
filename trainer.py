@@ -943,7 +943,7 @@ if __name__ == "__main__":
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
                 mode="min",  # Maximize reward
-                num_samples=6,  # Number of trials,
+                num_samples=10,  # Number of trials,
                 reuse_actors=True,
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
