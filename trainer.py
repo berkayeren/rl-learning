@@ -18,6 +18,7 @@ from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
 from minigrid.wrappers import RGBImgObsWrapper
 from ray import tune, train
+from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
 from ray.rllib.algorithms import ImpalaConfig
 from ray.rllib.callbacks.callbacks import RLlibCallback
