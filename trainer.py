@@ -838,10 +838,7 @@ if __name__ == "__main__":
                 "fcnet_activation": "relu",
                 "post_fcnet_hiddens": [512, 512],
                 "post_fcnet_activation": "tanh",
-                "conv_filters": [
-                    [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
-                    [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
-                ],
+                "conv_filters": [[16, 4, 2], [32, 4, 2], [64, 4, 2], [128, 4, 2]],
                 "conv_activation": "relu",
                 "vf_share_layers": False,
                 "framestack": True,
