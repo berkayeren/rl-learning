@@ -718,6 +718,12 @@ if __name__ == "__main__":
     parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
+    parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
+        "empty",
+        "crossing",
+        "four_rooms",
+        "multi_room",
+    ], default="empty")
     parser.add_argument('--run_mode', type=str, choices=['experiment', 'hyperparameter_search'], required=True,
                         help='Specify whether to run an experiment or hyperparameter search')
 
@@ -731,7 +737,7 @@ if __name__ == "__main__":
             }
         })
 
-    env_type = CustomEnv.Environments.multi_room
+    env_type = CustomEnv.Environments[args.environment]
 
     register_env("CustomPlaygroundCrossingEnv-v0",
                  lambda config:
@@ -824,7 +830,7 @@ if __name__ == "__main__":
         .training(
             gamma=0.99,  # Discount factor
             lr=1e-5,  # Learning rate
-            train_batch_size=32,  # Training batch size
+            train_batch_size=128,  # Training batch size
             grad_clip=40,
             optimizer={
                 "type": "RMSProp",
@@ -832,13 +838,16 @@ if __name__ == "__main__":
             opt_type="RMSProp",
             epsilon=0.01,
             vf_loss_coeff=0.5,
-            entropy_coeff=0.0001,
+            entropy_coeff=0.001,
             model={
                 "fcnet_hiddens": [1024, 1024],
                 "fcnet_activation": "relu",
                 "post_fcnet_hiddens": [512, 512],
                 "post_fcnet_activation": "tanh",
-                "conv_filters": [[16, 4, 2], [32, 4, 2], [64, 4, 2], [128, 4, 2]],
+                "conv_filters": [
+                    [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
+                    [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
+                ],
                 "conv_activation": "relu",
                 "vf_share_layers": False,
                 "framestack": True,
@@ -865,10 +874,10 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.5,
+            num_cpus_per_env_runner=1,
             num_gpus_per_env_runner=0,
             batch_mode="complete_episodes",
-            rollout_fragment_length=32
+            rollout_fragment_length=128
         )
         .framework("torch").resources(
             num_gpus=args.num_gpus / 6
@@ -902,9 +911,9 @@ if __name__ == "__main__":
         {
             **copy.deepcopy(config),
             "env_config": {
-                "enable_dowham_reward_v2": True,
+                "enable_dowham_reward_v2": False,
                 "env_type": env_type,
-                "max_steps": 400,
+                "max_steps": 1444,
             },
         },
     ]
@@ -934,7 +943,7 @@ if __name__ == "__main__":
                 "env_config": {
                     "enable_dowham_reward_v2": False,
                     "env_type": env_type,
-                    "max_steps": 800,
+                    "max_steps": 1444,
                 },
             },
             tune_config=tune.TuneConfig(
