@@ -718,6 +718,8 @@ if __name__ == "__main__":
     parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
+    parser.add_argument('--num_samples', type=int, help='Number of samples', default=1)
+    parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=10_000_000)
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
         "crossing",
@@ -930,7 +932,7 @@ if __name__ == "__main__":
             checkpoint_config=checkpoint_config,
             trial_name_creator=custom_trial_name,  # Custom trial name
             verbose=2,  # Display detailed logs
-            num_samples=1,  # Only one trial
+            num_samples=args.num_samples,
             log_to_file=True,
             resume="AUTO",
             max_failures=5
@@ -949,7 +951,7 @@ if __name__ == "__main__":
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",  # Optimize for return
                 mode="min",  # Maximize reward
-                num_samples=10,  # Number of trials,
+                num_samples=args.num_samples,
                 reuse_actors=True,
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
