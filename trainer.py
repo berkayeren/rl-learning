@@ -893,7 +893,7 @@ if __name__ == "__main__":
             rollout_fragment_length=128
         )
         .framework("torch").resources(
-            num_gpus=args.num_gpus / 6
+            num_gpus=args.num_gpus
         )
         .debugging(
             fake_sampler=False,
