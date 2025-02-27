@@ -252,7 +252,6 @@ class CustomEnv(EmptyEnv):
             self.intrinsic_reward *= 0.05
 
         if terminated:
-            reward = 1
             self.termination_reward = reward
         else:
             reward += self.intrinsic_reward
@@ -831,31 +830,43 @@ if __name__ == "__main__":
         ImpalaConfig()
         .training(
             gamma=0.99,  # Discount factor
-            lr=1e-5,  # Learning rate
-            train_batch_size=128,  # Training batch size
-            grad_clip=40,
+            lr=1e-4,  # Learning rate
+            # train_batch_size_per_learner=2000,
+            train_batch_size=128,
+            grad_clip=20,
             optimizer={
                 "type": "RMSProp",
+                "momentum": 0.0,
+                "epsilon": 0.01,
             },
-            opt_type="RMSProp",
+            opt_type="rmsprop",
             epsilon=0.01,
+            momentum=0,
             vf_loss_coeff=0.5,
-            entropy_coeff=0.001,
+            entropy_coeff=0.0001,
             model={
-                "fcnet_hiddens": [1024, 1024],
+                "fcnet_hiddens": [256, 256, 256],
                 "fcnet_activation": "relu",
-                "post_fcnet_hiddens": [512, 512],
-                "post_fcnet_activation": "tanh",
                 "conv_filters": [
-                    [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
-                    [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
+                    [32, [8, 8], 4],  # Conv1
+                    [64, [4, 4], 2],  # Conv2
+                    [64, [4, 4], 1],  # Conv3
                 ],
+                # "conv_filters": [
+                #     [16, [4, 4], 2],  # 88×88 -> ~43×43
+                #     [32, [4, 4], 2],  # 43×43 -> ~20×20
+                #     [64, [3, 3], 2],  # 20×20 -> ~9×9
+                # ],
+                # "conv_filters": [
+                #     [16, [8, 8], 8],
+                #     [128, [9, 9], 1],
+                # ],
                 "conv_activation": "relu",
                 "vf_share_layers": False,
-                "framestack": True,
-                "dim": 84,  # Resized observation dimension
-                "grayscale": False,
-                "zero_mean": True,
+                # "framestack": True,
+                "dim": 152,  # Resized observation dimension
+                # "grayscale": False,
+                # "zero_mean": True,
                 "use_lstm": False,
             }
         ).learners(
@@ -876,7 +887,7 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=1,
+            num_cpus_per_env_runner=0.5,
             num_gpus_per_env_runner=0,
             batch_mode="complete_episodes",
             rollout_fragment_length=128
@@ -915,7 +926,7 @@ if __name__ == "__main__":
             "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
-                "max_steps": 1444,
+                "max_steps": 500,
             },
         },
     ]
@@ -927,7 +938,7 @@ if __name__ == "__main__":
                 trails
             ),
             stop={
-                "timesteps_total": 10_000_000,
+                "timesteps_total": args.timesteps_total,
             },
             checkpoint_config=checkpoint_config,
             trial_name_creator=custom_trial_name,  # Custom trial name
