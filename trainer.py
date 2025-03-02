@@ -100,7 +100,7 @@ class CustomCallback(RLlibCallback):
         self.counter += 1
 
         # if self.counter % 1 == 0:
-        #     plot_heatmap(env, f"heat_map{self.counter}.png")
+        #     plot_heatmap(env, f"heatmaps/heat_map{env_index}{self.counter}.png")
         #     env.states = np.full((env.width, env.height), 0)
 
 
@@ -175,14 +175,14 @@ class CustomEnv(EmptyEnv):
         self.action = None
         self.reward_range = (0, 1)
         self.dowham_reward = None
-        self.tile_size = 8
+        self.tile_size = 24
         self.highlight = False
 
         super().__init__(
             size=19,
             tile_size=self.tile_size,
             highlight=self.highlight,
-            max_steps=self.max_steps,
+            # max_steps=self.max_steps,
             **kwargs)
 
         self.states = np.full((self.width, self.height), 0)
@@ -718,7 +718,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
     parser.add_argument('--num_samples', type=int, help='Number of samples', default=1)
-    parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=10_000_000)
+    parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
         "crossing",
@@ -743,6 +743,9 @@ if __name__ == "__main__":
     register_env("CustomPlaygroundCrossingEnv-v0",
                  lambda config:
                  RGBImgObsWrapper(CustomEnv(**config)))
+
+    env = RGBImgObsWrapper(CustomEnv(env_type=env_type))
+    obs = env.reset()
 
     # config = (
     #     PPOConfig()
@@ -830,27 +833,31 @@ if __name__ == "__main__":
         ImpalaConfig()
         .training(
             gamma=0.99,  # Discount factor
-            lr=1e-4,  # Learning rate
+            lr=0.0004,  # Learning rate
             # train_batch_size_per_learner=2000,
-            train_batch_size=128,
-            grad_clip=20,
+            # train_batch_size=512,
+            train_batch_size_per_learner=2000,
+            grad_clip=40,
             optimizer={
-                "type": "RMSProp",
+                "type": "rmsprop",
                 "momentum": 0.0,
-                "epsilon": 0.01,
+                "epsilon": 1e-5,
             },
             opt_type="rmsprop",
-            epsilon=0.01,
+            epsilon=1e-5,
             momentum=0,
             vf_loss_coeff=0.5,
-            entropy_coeff=0.0001,
+            entropy_coeff=0.0005,
             model={
-                "fcnet_hiddens": [256, 256, 256],
+                "fcnet_hiddens": [256, 256],
+                "post_fcnet_hiddens": [256, 256],
                 "fcnet_activation": "relu",
                 "conv_filters": [
-                    [32, [8, 8], 4],  # Conv1
-                    [64, [4, 4], 2],  # Conv2
-                    [64, [4, 4], 1],  # Conv3
+                    [32, [3, 3], 2],  # First Conv Layer: 32 filters, 3x3 kernel, stride 2
+                    [32, [3, 3], 2],  # Second Conv Layer: 32 filters, 3x3 kernel, stride 2
+                    [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
+                    [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
+                    [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
                 ],
                 # "conv_filters": [
                 #     [16, [4, 4], 2],  # 88×88 -> ~43×43
@@ -863,14 +870,12 @@ if __name__ == "__main__":
                 # ],
                 "conv_activation": "relu",
                 "vf_share_layers": False,
-                # "framestack": True,
-                "dim": 152,  # Resized observation dimension
-                # "grayscale": False,
-                # "zero_mean": True,
+                "framestack": False,
+                "dim": 88,  # Resized observation dimension
+                "grayscale": False,
                 "use_lstm": False,
             }
         ).learners(
-            num_learners=1,
             num_gpus_per_learner=args.num_gpus,
         )
         .experimental(
@@ -882,18 +887,18 @@ if __name__ == "__main__":
                 "env_type": env_type
             },
             disable_env_checking=True,
-            clip_actions=False,
+            is_atari=False,
+            observation_space=env.observation_space,
+            action_space=env.action_space,
         )
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=0.5,
             num_gpus_per_env_runner=0,
-            batch_mode="complete_episodes",
-            rollout_fragment_length=128
         )
         .framework("torch").resources(
-            num_gpus=args.num_gpus
+            num_gpus=args.num_gpus,
         )
         .debugging(
             fake_sampler=False,
@@ -902,7 +907,7 @@ if __name__ == "__main__":
             enable_env_runner_and_connector_v2=False,
         ).callbacks(CustomCallback)
         .evaluation(
-            evaluation_interval=20,
+            evaluation_interval=200,
             evaluation_duration=10,
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,
@@ -926,7 +931,6 @@ if __name__ == "__main__":
             "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
-                "max_steps": 500,
             },
         },
     ]
@@ -934,9 +938,7 @@ if __name__ == "__main__":
     if args.run_mode == 'experiment':
         trail = tune.run(
             "IMPALA",  # Specify the RLlib algorithm
-            config=tune.grid_search(
-                trails
-            ),
+            config=trails[0],
             stop={
                 "timesteps_total": args.timesteps_total,
             },
@@ -967,7 +969,7 @@ if __name__ == "__main__":
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
-            run_config=train.RunConfig(stop={"timesteps_total": 10_000_000},
+            run_config=train.RunConfig(stop={"timesteps_total": args.timesteps_total},
                                        failure_config=FailureConfig(max_failures=-1)),
         )
 
