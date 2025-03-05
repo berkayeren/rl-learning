@@ -182,7 +182,7 @@ class CustomEnv(EmptyEnv):
             size=19,
             tile_size=self.tile_size,
             highlight=self.highlight,
-            # max_steps=self.max_steps,
+            max_steps=self.max_steps,
             **kwargs)
 
         self.states = np.full((self.width, self.height), 0)
@@ -742,9 +742,9 @@ if __name__ == "__main__":
 
     register_env("CustomPlaygroundCrossingEnv-v0",
                  lambda config:
-                 RGBImgObsWrapper(CustomEnv(**config)))
+                 RGBImgObsWrapper(FullyObsWrapper(CustomEnv(**config))))
 
-    env = RGBImgObsWrapper(CustomEnv(env_type=env_type))
+    env = RGBImgObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
     obs = env.reset()
 
     # config = (
@@ -833,25 +833,31 @@ if __name__ == "__main__":
         ImpalaConfig()
         .training(
             gamma=0.99,  # Discount factor
-            lr=0.0004,  # Learning rate
+            lr=1e-4,  # Learning rate
             # train_batch_size_per_learner=2000,
             # train_batch_size=512,
             train_batch_size_per_learner=2000,
-            grad_clip=40,
+            # train_batch_size=2000,  # Larger batch size for stability
+            grad_clip=5,
             optimizer={
                 "type": "rmsprop",
                 "momentum": 0.0,
                 "epsilon": 1e-5,
             },
-            opt_type="rmsprop",
-            epsilon=1e-5,
-            momentum=0,
-            vf_loss_coeff=0.5,
-            entropy_coeff=0.0005,
+            # opt_type="rmsprop",
+            # epsilon=1e-5,
+            # momentum=0,
+            vf_loss_coeff=0.1,
+            entropy_coeff=0.005,
             model={
-                "fcnet_hiddens": [256, 256],
-                "post_fcnet_hiddens": [256, 256],
+                "fcnet_hiddens": [512, 512],
+                "post_fcnet_hiddens": [512, 512],
                 "fcnet_activation": "relu",
+                # "conv_filters": [
+                #     [32, [3, 3], 2],
+                #     [64, [3, 3], 2],
+                #     [64, [3, 3], 2],
+                # ],
                 "conv_filters": [
                     [32, [3, 3], 2],  # First Conv Layer: 32 filters, 3x3 kernel, stride 2
                     [32, [3, 3], 2],  # Second Conv Layer: 32 filters, 3x3 kernel, stride 2
@@ -871,7 +877,7 @@ if __name__ == "__main__":
                 "conv_activation": "relu",
                 "vf_share_layers": False,
                 "framestack": False,
-                "dim": 88,  # Resized observation dimension
+                # "dim": 88,  # Resized observation dimension
                 "grayscale": False,
                 "use_lstm": False,
             }
@@ -931,6 +937,7 @@ if __name__ == "__main__":
             "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
+                "max_steps": 200,
             },
         },
     ]
