@@ -16,7 +16,7 @@ from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
