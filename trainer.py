@@ -900,7 +900,7 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.5,
+            num_cpus_per_env_runner=0.25,
             num_gpus_per_env_runner=0,
         )
         .framework("torch").resources(
