@@ -905,7 +905,7 @@ if __name__ == "__main__":
             batch_mode="truncate_episodes",  # Better for IMPALA
         )
         .framework("torch").resources(
-            num_gpus=0.3,
+            num_gpus=1,
             placement_strategy="SPREAD",
         )
         .debugging(
