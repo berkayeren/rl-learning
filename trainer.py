@@ -99,6 +99,9 @@ class CustomCallback(RLlibCallback):
         episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
         self.counter += 1
 
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # if self.counter % 1 == 0:
         #     plot_heatmap(env, f"heatmaps/heat_map{env_index}{self.counter}.png")
         #     env.states = np.full((env.width, env.height), 0)
@@ -896,12 +899,12 @@ if __name__ == "__main__":
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=0.2,
-            num_gpus_per_env_runner=1 / args.num_rollout_workers * 3,
+            num_gpus_per_env_runner=0,
             rollout_fragment_length=32,
             batch_mode="truncate_episodes",  # Better for IMPALA
         )
         .framework("torch").resources(
-            num_gpus=args.num_gpus / 4,
+            num_gpus=0.2,
             placement_strategy="SPREAD",
         )
         .debugging(
