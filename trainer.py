@@ -100,7 +100,7 @@ class CustomCallback(RLlibCallback):
         episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
         self.counter += 1
 
-        if torch.cuda.is_available():
+        if self.counter % 100 == 0 and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         # if self.counter % 1 == 0:
