@@ -879,7 +879,7 @@ if __name__ == "__main__":
                 "zero_mean": True,  # Normalize inputs
             }
         ).learners(
-            num_gpus_per_learner=0,
+            num_gpus_per_learner=0.8,
             num_learners=1,
             num_cpus_per_learner=1,
         )
@@ -899,7 +899,7 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.2,
+            num_cpus_per_env_runner=1,
             num_gpus_per_env_runner=0,
             rollout_fragment_length=32,
             batch_mode="truncate_episodes",  # Better for IMPALA
@@ -941,7 +941,7 @@ if __name__ == "__main__":
             "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
-                "max_steps": 1444,
+                "max_steps": 100,
             },
         },
     ]
