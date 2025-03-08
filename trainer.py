@@ -723,6 +723,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
     parser.add_argument('--num_samples', type=int, help='Number of samples', default=1)
     parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
+    parser.add_argument('--max_steps', type=int, help='Max Time Steps', default=200)
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
         "crossing",
@@ -940,7 +941,7 @@ if __name__ == "__main__":
             "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
-                "max_steps": 100,
+                "max_steps": args.max_steps,
             },
         },
     ]
@@ -968,7 +969,7 @@ if __name__ == "__main__":
                 "env_config": {
                     "enable_dowham_reward_v2": False,
                     "env_type": env_type,
-                    "max_steps": 1444,
+                    "max_steps": args.max_steps,
                 },
             },
             tune_config=tune.TuneConfig(
