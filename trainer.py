@@ -835,23 +835,24 @@ if __name__ == "__main__":
             gamma=0.99,  # Discount factor
             lr=1e-4,  # Learning rate
             # train_batch_size_per_learner=2000,
-            # train_batch_size=512,
-            train_batch_size_per_learner=2000,
+            train_batch_size=32,
+            train_batch_size_per_learner=32,
+            # train_batch_size_per_learner=5000,
             # train_batch_size=2000,  # Larger batch size for stability
             grad_clip=5,
             optimizer={
                 "type": "rmsprop",
                 "momentum": 0.0,
-                "epsilon": 1e-5,
+                "epsilon": 0.01,
             },
-            # opt_type="rmsprop",
-            # epsilon=1e-5,
-            # momentum=0,
-            vf_loss_coeff=0.1,
+            opt_type="rmsprop",
+            epsilon=0.01,
+            momentum=0,
+            vf_loss_coeff=0.5,
             entropy_coeff=0.005,
             model={
                 "fcnet_hiddens": [512, 512],
-                "post_fcnet_hiddens": [512, 512],
+                "post_fcnet_hiddens": [512],
                 "fcnet_activation": "relu",
                 # "conv_filters": [
                 #     [32, [3, 3], 2],
@@ -865,24 +866,18 @@ if __name__ == "__main__":
                     [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
                     [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
                 ],
-                # "conv_filters": [
-                #     [16, [4, 4], 2],  # 88×88 -> ~43×43
-                #     [32, [4, 4], 2],  # 43×43 -> ~20×20
-                #     [64, [3, 3], 2],  # 20×20 -> ~9×9
-                # ],
-                # "conv_filters": [
-                #     [16, [8, 8], 8],
-                #     [128, [9, 9], 1],
-                # ],
-                "conv_activation": "relu",
+                "conv_activation": "elu",
                 "vf_share_layers": False,
                 "framestack": False,
-                # "dim": 88,  # Resized observation dimension
                 "grayscale": False,
                 "use_lstm": False,
+                "custom_preprocessor": None,
+                "zero_mean": True,  # Normalize inputs
             }
         ).learners(
-            num_gpus_per_learner=args.num_gpus,
+            num_gpus_per_learner=0,
+            num_learners=1,
+            num_cpus_per_learner=1,
         )
         .experimental(
             _disable_preprocessor_api=True, )
@@ -900,11 +895,14 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.5,
-            num_gpus_per_env_runner=0,
+            num_cpus_per_env_runner=0.2,
+            num_gpus_per_env_runner=1 / args.num_rollout_workers * 3,
+            rollout_fragment_length=32,
+            batch_mode="truncate_episodes",  # Better for IMPALA
         )
         .framework("torch").resources(
             num_gpus=args.num_gpus,
+            placement_strategy="SPREAD",
         )
         .debugging(
             fake_sampler=False,
@@ -918,6 +916,8 @@ if __name__ == "__main__":
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,
             evaluation_sample_timeout_s=120,
+        ).fault_tolerance(
+            restart_failed_env_runners=True
         )
     )
 
@@ -937,7 +937,7 @@ if __name__ == "__main__":
             "env_config": {
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
-                "max_steps": 200,
+                "max_steps": 1444,
             },
         },
     ]
