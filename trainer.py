@@ -950,6 +950,8 @@ if __name__ == "__main__":
         trail = tune.run(
             "IMPALA",  # Specify the RLlib algorithm
             config=trails[0],
+            metric="env_runners/episode_len_mean",
+            mode="min",  # Minimizing episode length
             stop={
                 "timesteps_total": args.timesteps_total,
             },
