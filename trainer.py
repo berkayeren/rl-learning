@@ -10,6 +10,7 @@ from typing import Union, Optional, Dict
 import gymnasium as gym
 import numpy as np
 import ray
+import torch
 from gymnasium import spaces
 from matplotlib import pyplot as plt
 from minigrid.core.constants import COLOR_NAMES
