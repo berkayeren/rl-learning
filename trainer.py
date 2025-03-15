@@ -17,7 +17,7 @@ from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
@@ -172,6 +172,7 @@ class CustomEnv(EmptyEnv):
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
         self.direction_obs = kwargs.pop('direction_obs', True)
         self.max_steps = kwargs.pop('max_steps', 200)
+        self.conv_filter = kwargs.pop('conv_filter', False)
         print(f"Enable Dowham Reward V2: {self.enable_dowham_reward_v2}")
 
         self.percentage_visited = 0.0
@@ -648,7 +649,10 @@ class CustomEnv(EmptyEnv):
 
     def gen_obs(self):
         obs = super().gen_obs()
-        obs.pop('mission')
+
+        if self.conv_filter:
+            obs.pop('mission')
+
         return obs
 
     def reset(self, **kwargs):
@@ -724,6 +728,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_samples', type=int, help='Number of samples', default=1)
     parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
     parser.add_argument('--max_steps', type=int, help='Max Time Steps', default=200)
+    parser.add_argument('--conv_filter', type=bool, help='Use convolutional layer or flat observation', default=False)
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
         "crossing",
@@ -745,12 +750,20 @@ if __name__ == "__main__":
 
     env_type = CustomEnv.Environments[args.environment]
 
-    register_env("CustomPlaygroundCrossingEnv-v0",
-                 lambda config:
-                 RGBImgObsWrapper(FullyObsWrapper(CustomEnv(**config))))
+    if args.conv_filter:
+        register_env("CustomPlaygroundCrossingEnv-v0",
+                     lambda config:
+                     RGBImgObsWrapper(FullyObsWrapper(CustomEnv(**config))))
 
-    env = RGBImgObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
-    obs = env.reset()
+        env = RGBImgObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
+        obs = env.reset()
+    else:
+        register_env("CustomPlaygroundCrossingEnv-v0",
+                     lambda config:
+                     FlatObsWrapper(FullyObsWrapper(CustomEnv(**config))))
+
+        env = FlatObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
+        obs = env.reset()
 
     # config = (
     #     PPOConfig()
@@ -837,11 +850,12 @@ if __name__ == "__main__":
     config = (
         ImpalaConfig()
         .training(
+            vtrace=True,
             gamma=0.99,  # Discount factor
             lr=1e-4,  # Learning rate
-            # train_batch_size_per_learner=2000,
-            train_batch_size=32,
-            train_batch_size_per_learner=32,
+            train_batch_size_per_learner=2000,
+            # train_batch_size=32,
+            # train_batch_size_per_learner=32,
             # train_batch_size_per_learner=5000,
             # train_batch_size=2000,  # Larger batch size for stability
             grad_clip=5,
@@ -853,11 +867,11 @@ if __name__ == "__main__":
             opt_type="rmsprop",
             epsilon=0.01,
             momentum=0,
-            vf_loss_coeff=0.5,
+            vf_loss_coeff=0.1,
             entropy_coeff=0.005,
             model={
                 "fcnet_hiddens": [512, 512],
-                "post_fcnet_hiddens": [512],
+                "post_fcnet_hiddens": [512, 512],
                 "fcnet_activation": "relu",
                 # "conv_filters": [
                 #     [32, [3, 3], 2],
@@ -870,7 +884,7 @@ if __name__ == "__main__":
                     [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
                     [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
                     [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
-                ],
+                ] if args.conv_filter else None,
                 "conv_activation": "elu",
                 "vf_share_layers": False,
                 "framestack": False,
@@ -880,7 +894,7 @@ if __name__ == "__main__":
                 "zero_mean": True,  # Normalize inputs
             }
         ).learners(
-            num_gpus_per_learner=0.8,
+            num_gpus_per_learner=0.8 if args.num_gpus > 0 else 0,
             num_learners=1,
             num_cpus_per_learner=1,
         )
@@ -900,13 +914,13 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=1,
+            num_cpus_per_env_runner=0.25,
             num_gpus_per_env_runner=0,
             rollout_fragment_length=32,
             batch_mode="truncate_episodes",  # Better for IMPALA
         )
         .framework("torch").resources(
-            placement_strategy="SPREAD",
+            num_gpus=args.num_gpus,
         )
         .debugging(
             fake_sampler=False,
@@ -942,6 +956,7 @@ if __name__ == "__main__":
                 "enable_dowham_reward_v2": False,
                 "env_type": env_type,
                 "max_steps": args.max_steps,
+                "conv_filter": args.conv_filter,
             },
         },
     ]
@@ -950,8 +965,8 @@ if __name__ == "__main__":
         trail = tune.run(
             "IMPALA",  # Specify the RLlib algorithm
             config=trails[0],
-            metric="env_runners/episode_len_mean",
-            mode="min",  # Minimizing episode length
+            metric="env_runners/episode_reward_mean",
+            mode="max",  # Minimizing episode length
             stop={
                 "timesteps_total": args.timesteps_total,
             },
@@ -971,7 +986,7 @@ if __name__ == "__main__":
                 "env_config": {
                     "enable_dowham_reward_v2": False,
                     "env_type": env_type,
-                    "max_steps": args.max_steps,
+                    "max_steps": tune.grid_search([500, 600, 700, 800]),
                 },
             },
             tune_config=tune.TuneConfig(
