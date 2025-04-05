@@ -17,11 +17,11 @@ from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import EmptyEnv, MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
-from ray.rllib.algorithms import ImpalaConfig
+from ray.rllib.algorithms import PPOConfig
 from ray.rllib.callbacks.callbacks import RLlibCallback
 from ray.rllib.core.rl_module import RLModule
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
@@ -30,6 +30,8 @@ from ray.rllib.utils.typing import EpisodeType, PolicyID
 from ray.tune import register_env, CheckpointConfig
 from ray.tune.search import BasicVariantGenerator
 
+from environments.minigrid_wrapper import PositionBasedWrapper
+from intrinsic_motivation.count_based import CountExploration
 from intrinsic_motivation.dowham_v2 import DoWhaMIntrinsicRewardV2
 
 
@@ -103,9 +105,12 @@ class CustomCallback(RLlibCallback):
         if self.counter % 100 == 0 and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # if self.counter % 1 == 0:
-        #     plot_heatmap(env, f"heatmaps/heat_map{env_index}{self.counter}.png")
-        #     env.states = np.full((env.width, env.height), 0)
+        # try:
+        #     if self.counter % 100 == 0:
+        #         plot_heatmap(env, f"heatmaps/heat_map{env_index}{self.counter}.png")
+        #         env.states = np.full((env.width, env.height), 0)
+        # except Exception:
+        #     pass
 
 
 def plot_heatmap(env, filename="visit_heatmap.png"):
@@ -170,6 +175,7 @@ class CustomEnv(EmptyEnv):
         self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
+        self.enable_count_based = kwargs.pop('enable_count_based', False)
         self.direction_obs = kwargs.pop('direction_obs', True)
         self.max_steps = kwargs.pop('max_steps', 200)
         self.conv_filter = kwargs.pop('conv_filter', False)
@@ -178,7 +184,7 @@ class CustomEnv(EmptyEnv):
         self.percentage_visited = 0.0
         self.percentage_history = collections.deque(maxlen=100)
         self.action = None
-        self.reward_range = (0, 1)
+        self.reward_range = (-1, 1)
         self.dowham_reward = None
         self.tile_size = 24
         self.highlight = False
@@ -188,13 +194,18 @@ class CustomEnv(EmptyEnv):
             tile_size=self.tile_size,
             highlight=self.highlight,
             max_steps=self.max_steps,
+            # render_mode="human",
             **kwargs)
 
         self.states = np.full((self.width, self.height), 0)
 
         if self.enable_dowham_reward_v2:
+            print("Enable Dowham Reward V2")
             self.reward_range = (-1, 1)
             self.dowham_reward = DoWhaMIntrinsicRewardV2(eta=40, H=1, tau=0.5)
+        if self.enable_count_based:
+            print(f"Count Based Exploration Enabled")
+            self.count_based = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
 
         new_image_space = spaces.Box(
             low=0,
@@ -216,47 +227,65 @@ class CustomEnv(EmptyEnv):
         if self.env_type == CustomEnv.Environments.crossing:
             self.obstacle_type = Wall
             self.num_crossings = 1
-            # self.actions = CustomEnv.NavigationOnlyActions
-            # self.action_space = spaces.Discrete(len(self.actions))
+            self.max_door = 1
 
         if self.env_type == CustomEnv.Environments.empty:
-            # self.actions = CustomEnv.NavigationOnlyActions
-            # self.action_space = spaces.Discrete(len(self.actions))
-            pass
+            self.max_door = 0
+
+        if self.env_type == CustomEnv.Environments.four_rooms:
+            self.max_door = 4
+
+        if self.env_type == CustomEnv.Environments.multi_room:
+            self.max_door = 3
 
         self.intrinsic_reward = 0
         self.done = False
 
+    def _reward(self) -> float:
+        """
+        Compute the reward to be given upon success
+        """
+        # Ensures minimum reward of 0.5 even at max steps
+        # Provides better gradient between optimal and worst-case performance
+        return 1.0 - 0.9 * (self.step_count / self.max_steps)
+
     def step(self, action: int):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action = action
-        current_obs = self.img_observation()
+        # current_obs = self.img_observation()
         prev_pos = self.agent_pos
+        # prev_dir = self.agent_dir
         obs, reward, terminated, truncated, _ = super().step(action)
-        next_obs = self.img_observation()
-        next_pos = self.agent_pos
+        # next_obs = self.img_observation()
+        # next_pos = self.agent_pos
+        # next_dir = self.agent_dir
+        #
+        # if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
+        #     self.dowham_reward.update_state_visits(prev_pos, next_pos)
+        #     state_changed = current_obs != next_obs or prev_dir != next_dir
+        #     self.dowham_reward.update_usage(prev_pos, action)
+        #
+        #     self.dowham_reward.update_effectiveness(
+        #         prev_pos,
+        #         action,
+        #         next_pos,
+        #         state_changed
+        #     )
+        #
+        #     self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
+        #         prev_pos,
+        #         action,
+        #         next_pos,
+        #         state_changed
+        #     )
+        #     self.intrinsic_reward *= 0.05
 
-        if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
-            self.dowham_reward.update_state_visits(prev_pos, next_pos)
-            state_changed = current_obs != next_obs
-            self.dowham_reward.update_usage(prev_pos, action)
+        if self.enable_count_based:
+            reward = self.count_based.update(prev_pos, action, reward, self.goal_pos)
 
-            self.dowham_reward.update_effectiveness(
-                prev_pos,
-                action,
-                next_pos,
-                state_changed
-            )
-
-            self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
-                prev_pos,
-                action,
-                next_pos,
-                state_changed
-            )
-            self.intrinsic_reward *= 0.05
-
+        reward = reward * 0.05
         if terminated:
+            reward = self._reward()
             self.termination_reward = reward
         else:
             reward += self.intrinsic_reward
@@ -323,7 +352,7 @@ class CustomEnv(EmptyEnv):
 
         # Place a goal square in the bottom-right corner
         self.put_obj(Goal(), width - 2, height - 2)
-        self.goal_position = (width - 2, height - 2)
+        self.goal_pos = (width - 2, height - 2)
 
         # Place obstacles (lava or walls)
         v, h = object(), object()  # singleton `vertical` and `horizontal` objects
@@ -365,8 +394,8 @@ class CustomEnv(EmptyEnv):
                 room_j += 1
             else:
                 assert False
-            self.grid.set(i, j, None)
-
+            self.grid.set(i, j, Door(color="yellow", is_open=False))
+        self.max_door = 1
         self.mission = (
             "avoid the lava and get to the green goal square"
             if self.obstacle_type == Lava
@@ -374,13 +403,15 @@ class CustomEnv(EmptyEnv):
         )
 
     def empty_env_random_goal(self, width, height):
+        self.max_door = 0
         self.agent_pos = (1, 1)
         self.agent_dir = 0
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
         # Get grid size from environment
         grid_size = self.width  # Assuming width == height
-
+        # self.put_obj(Goal(), 17, 17)
+        # self.goal_pos = (17, 17)
         # Randomly assign a new goal position (excluding (1,1))
         while True:
             self.goal_pos = (np.random.randint(1, grid_size - 2), np.random.randint(1, grid_size - 2))
@@ -389,6 +420,7 @@ class CustomEnv(EmptyEnv):
                 break
 
     def four_rooms(self, width, height):
+        self.max_door = 4
         self.agent_pos = np.array((1, 1))
         self.agent_dir = 0
         self.goal_pos = (width - 2, height - 2)
@@ -419,13 +451,13 @@ class CustomEnv(EmptyEnv):
                 if i + 1 < 2:
                     self.grid.vert_wall(xR, yT, room_h)
                     pos = (xR, self._rand_int(yT + 1, yB))
-                    self.grid.set(*pos, None)
+                    self.grid.set(pos[0], pos[1], Door(color="yellow", is_open=False))
 
                 # Bottom wall and door
                 if j + 1 < 2:
                     self.grid.horz_wall(xL, yB, room_w)
                     pos = (self._rand_int(xL + 1, xR), yB)
-                    self.grid.set(*pos, None)
+                    self.grid.set(pos[0], pos[1], Door(color="yellow", is_open=False))
 
         # Randomize the player start position and orientation
         if self._agent_default_pos is not None:
@@ -461,6 +493,7 @@ class CustomEnv(EmptyEnv):
         self.grid.set(3, 6, Door(color="yellow", is_open=False))
         self.grid.set(6, 9, Door(color="yellow", is_open=False))
         self.grid.set(14, 10, Door(color="yellow", is_open=False))
+        self.max_door = 3
         # ----------------------------------------------------------------------
         # 4) Agent start in the top-left corridor
         # ----------------------------------------------------------------------
@@ -648,6 +681,9 @@ class CustomEnv(EmptyEnv):
         return True
 
     def gen_obs(self):
+        #
+        # [x,y, direction] [goal_X, goal_Y, goal,]
+        # degisebilecek tüm bilgileri agent a verecek bir wrapper yaz.
         obs = super().gen_obs()
 
         if self.conv_filter:
@@ -728,7 +764,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_samples', type=int, help='Number of samples', default=1)
     parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
     parser.add_argument('--max_steps', type=int, help='Max Time Steps', default=200)
-    parser.add_argument('--conv_filter', type=bool, help='Use convolutional layer or flat observation', default=False)
+    parser.add_argument('--conv_filter', action="store_true", help='Use convolutional layer or flat observation')
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
         "crossing",
@@ -760,12 +796,12 @@ if __name__ == "__main__":
     else:
         register_env("CustomPlaygroundCrossingEnv-v0",
                      lambda config:
-                     FlatObsWrapper(FullyObsWrapper(CustomEnv(**config))))
+                     PositionBasedWrapper(CustomEnv(**config)))
 
-        env = FlatObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
+        env = PositionBasedWrapper(CustomEnv(env_type=env_type))
         obs = env.reset()
 
-    # config = (
+        # config = (
     #     PPOConfig()
     #     .training(
     #         gamma=0.99,  # Discount factor
@@ -848,30 +884,30 @@ if __name__ == "__main__":
     #     )
     # )
     config = (
-        ImpalaConfig()
+        PPOConfig()
         .training(
-            vtrace=True,
+            use_critic=True,
+            use_kl_loss=False,
+            # vtrace=True,
             gamma=0.99,  # Discount factor
             lr=1e-4,  # Learning rate
-            train_batch_size_per_learner=2000,
-            # train_batch_size=32,
-            # train_batch_size_per_learner=32,
-            # train_batch_size_per_learner=5000,
-            # train_batch_size=2000,  # Larger batch size for stability
-            grad_clip=5,
-            optimizer={
-                "type": "rmsprop",
-                "momentum": 0.0,
-                "epsilon": 0.01,
-            },
-            opt_type="rmsprop",
-            epsilon=0.01,
-            momentum=0,
-            vf_loss_coeff=0.1,
+            train_batch_size_per_learner=1024,
+            train_batch_size=1024,  # Larger batches
+            num_sgd_iter=2,  # More SGD iterations
+            grad_clip=5.0,  # Tighter gradient clipping
+            # optimizer={
+            #     "type": "rmsprop",
+            #     "momentum": 0.0,
+            #     "epsilon": 0.01,
+            # },
+            # opt_type="rmsprop",
+            # epsilon=0.01,
+            # momentum=0.0,
+            vf_loss_coeff=0.5,  # Value function loss coefficient
             entropy_coeff=0.005,
             model={
-                "fcnet_hiddens": [512, 512],
-                "post_fcnet_hiddens": [512, 512],
+                "fcnet_hiddens": [32, 32],
+                "post_fcnet_hiddens": [32],
                 "fcnet_activation": "relu",
                 # "conv_filters": [
                 #     [32, [3, 3], 2],
@@ -889,9 +925,11 @@ if __name__ == "__main__":
                 "vf_share_layers": False,
                 "framestack": False,
                 "grayscale": False,
-                "use_lstm": False,
                 "custom_preprocessor": None,
-                "zero_mean": True,  # Normalize inputs
+                "zero_mean": False,  # Normalize inputs with dim
+                "use_lstm": False,  # Add recurrent layer for temporal dependencies
+                "lstm_cell_size": 128,
+                "max_seq_len": 33,
             }
         ).learners(
             num_gpus_per_learner=0.8 if args.num_gpus > 0 else 0,
@@ -916,8 +954,15 @@ if __name__ == "__main__":
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=0.25,
             num_gpus_per_env_runner=0,
-            rollout_fragment_length=32,
-            batch_mode="truncate_episodes",  # Better for IMPALA
+            # rollout_fragment_length=256,
+            batch_mode="complete_episodes",  # Better for IMPALA
+            # explore=True,
+            # exploration_config={
+            #     "type": "EpsilonGreedy",
+            #     "initial_epsilon": 1.0,
+            #     "final_epsilon": 0.01,
+            #     "epsilon_timesteps": 1_000_000,
+            # }
         )
         .framework("torch").resources(
             num_gpus=args.num_gpus,
@@ -954,6 +999,17 @@ if __name__ == "__main__":
             **copy.deepcopy(config),
             "env_config": {
                 "enable_dowham_reward_v2": False,
+                "enable_count_based": True,
+                "env_type": env_type,
+                "max_steps": args.max_steps,
+                "conv_filter": args.conv_filter,
+            },
+        },
+        {
+            **copy.deepcopy(config),
+            "env_config": {
+                "enable_dowham_reward_v2": False,
+                "enable_count_based": False,
                 "env_type": env_type,
                 "max_steps": args.max_steps,
                 "conv_filter": args.conv_filter,
@@ -963,8 +1019,11 @@ if __name__ == "__main__":
 
     if args.run_mode == 'experiment':
         trail = tune.run(
-            "IMPALA",  # Specify the RLlib algorithm
+            "PPO",  # Specify the RLlib algorithm
             config=trails[0],
+            # config=tune.grid_search(
+            #     trails
+            # ),
             metric="env_runners/episode_reward_mean",
             mode="max",  # Minimizing episode length
             stop={
@@ -976,22 +1035,24 @@ if __name__ == "__main__":
             num_samples=args.num_samples,
             log_to_file=True,
             resume="AUTO",
-            max_failures=5
+            max_failures=5,
+            reuse_actors=True
         )
     elif args.run_mode == 'hyperparameter_search':
         trail = tune.Tuner(
-            "IMPALA",  # Specify the RLlib algorithm
+            "PPO",  # Specify the RLlib algorithm
             param_space={
                 **copy.deepcopy(config),
                 "env_config": {
                     "enable_dowham_reward_v2": False,
                     "env_type": env_type,
-                    "max_steps": tune.grid_search([500, 600, 700, 800]),
+                    "max_steps": args.max_steps,
                 },
+                "num_sgd_iter": tune.grid_search([3, 5, 10]),
             },
             tune_config=tune.TuneConfig(
-                metric="env_runners/episode_len_mean",  # Optimize for return
-                mode="min",  # Maximize reward
+                metric="env_runners/episode_reward_mean",  # Optimize for return
+                mode="max",  # Maximize reward
                 num_samples=args.num_samples,
                 reuse_actors=True,
                 search_alg=BasicVariantGenerator(),
@@ -1000,6 +1061,19 @@ if __name__ == "__main__":
             run_config=train.RunConfig(stop={"timesteps_total": args.timesteps_total},
                                        failure_config=FailureConfig(max_failures=-1)),
         )
+        # trail = tune.Tuner.restore(
+        #     path="/Users/berkayeren/ray_results/IMPALA_2025-03-05_21-39-47",
+        #     trainable="IMPALA",
+        #     param_space={
+        #         **copy.deepcopy(config),
+        #         "env_config": {
+        #             "enable_dowham_reward_v2": False,
+        #             "env_type": env_type,
+        #             "max_steps": 200,
+        #         },
+        #         "vf_loss_coeff": tune.grid_search([0.1, 0.2, 0.5]),
+        #     },
+        # )
 
         results = trail.fit()
         best_trial = results.get_best_result(metric="env_runners/episode_len_mean", mode="min")
