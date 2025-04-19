@@ -999,8 +999,8 @@ if __name__ == "__main__":
             },
             disable_env_checking=True,
             is_atari=False,
-            observation_space=env.observation_space,
-            action_space=env.action_space,
+            # observation_space=env.observation_space,
+            # action_space=env.action_space,
         )
         .env_runners(
             num_env_runners=args.num_rollout_workers,
@@ -1048,27 +1048,40 @@ if __name__ == "__main__":
         checkpoint_score_order="min"
     )
 
-    trails = [
-        {
-            **copy.deepcopy(config),
-            "env_config": {
-                "enable_dowham_reward_v2": False,
-                "enable_count_based": False,
-                "enable_rnd": False,
-                "env_type": env_type,
-                "max_steps": args.max_steps,
-                "conv_filter": args.conv_filter,
-            },
-        },
-    ]
-
     if args.run_mode == 'experiment':
+        search_space = {
+            **copy.deepcopy(config),
+            "env_config": tune.grid_search([
+                # Default PPO
+                {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
+                {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
+                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
+
+                # PPO with Count reward
+                {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
+                {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
+                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
+
+                # PPO with RND reward
+                {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
+                {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
+                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True}
+            ]),
+            "seed": tune.grid_search(list(range(args.num_samples))),
+        }
+
         trail = tune.run(
             "PPO",  # Specify the RLlib algorithm
-            config=trails[0],
-            # config=tune.grid_search(
-            #     trails
-            # ),
+            config=search_space,
             metric="env_runners/episode_reward_mean",
             mode="max",  # Minimizing episode length
             stop={
@@ -1077,12 +1090,12 @@ if __name__ == "__main__":
             checkpoint_config=checkpoint_config,
             trial_name_creator=custom_trial_name,  # Custom trial name
             verbose=2,  # Display detailed logs
-            num_samples=args.num_samples,
+            num_samples=1,
             log_to_file=True,
             resume="AUTO",
             max_failures=-1,
-            name=f"PPO_default_{CustomEnv.Environments(env_type).name}",
-            reuse_actors=True
+            name=f"PPO_ALL",
+            reuse_actors=False
         )
     elif args.run_mode == 'hyperparameter_search':
         trail = tune.Tuner(
