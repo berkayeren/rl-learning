@@ -46,16 +46,16 @@ class RunningStats:
 class TargetNetwork(nn.Module):
     """Random Target Network: Outputs fixed embeddings for observations."""
 
-    def __init__(self, input_dim, embed_dim):
+    def __init__(self, input_dim, embed_dim, hidden_size=32):
         super(TargetNetwork, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 1024),
-            nn.LayerNorm(1024),
+            nn.Linear(input_dim, hidden_size),
+            nn.LayerNorm(hidden_size),
             nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.LayerNorm(512),
+            nn.Linear(hidden_size, hidden_size),
+            nn.LayerNorm(hidden_size),
             nn.ReLU(),
-            nn.Linear(512, embed_dim)
+            nn.Linear(hidden_size, embed_dim)
         )
 
     def forward(self, x):
@@ -65,16 +65,16 @@ class TargetNetwork(nn.Module):
 class PredictorNetwork(nn.Module):
     """Trainable Predictor Network: Learns to mimic the target network."""
 
-    def __init__(self, input_dim, embed_dim):
+    def __init__(self, input_dim, embed_dim, hidden_size=32):
         super(PredictorNetwork, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 1024),
-            nn.LayerNorm(1024),
+            nn.Linear(input_dim, hidden_size),
+            nn.LayerNorm(hidden_size),
             nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.LayerNorm(512),
+            nn.Linear(hidden_size, hidden_size),
+            nn.LayerNorm(hidden_size),
             nn.ReLU(),
-            nn.Linear(512, embed_dim)
+            nn.Linear(hidden_size, embed_dim)
         )
 
     def forward(self, x):
@@ -86,12 +86,10 @@ class RNDModule:
     RND Module to calculate intrinsic rewards and train the predictor network.
     """
 
-    def __init__(self, embed_dim=64, predictor_lr=1e-5, reward_scale=0.1):
-        input_dim = 1447  # Hardcoded for the given environment
-
+    def __init__(self, input_dim=1447, embed_dim=64, hidden_size=32, predictor_lr=1e-5, reward_scale=0.1):
         # Target and Predictor Networks
-        self.target_network = TargetNetwork(input_dim, embed_dim)
-        self.predictor_network = PredictorNetwork(input_dim, embed_dim)
+        self.target_network = TargetNetwork(input_dim, embed_dim, hidden_size)
+        self.predictor_network = PredictorNetwork(input_dim, embed_dim, hidden_size)
 
         # Freeze target network
         for param in self.target_network.parameters():
@@ -116,12 +114,15 @@ class RNDModule:
         """
         Compute the intrinsic reward as the prediction error.
         """
-        observation = numpy.array(observation)
+        observation = numpy.array(observation, dtype=np.float32)
         observation = torch.tensor(observation, dtype=torch.float32).unsqueeze(0)  # Add batch dimension
-        target_output = self.target_network(observation)
-        predictor_output = self.predictor_network(observation)
-        intrinsic_reward = torch.mean((target_output - predictor_output) ** 2, dim=-1).item()
+        # Get outputs from both networks
+        with torch.no_grad():  # No need for gradients during inference
+            target_output = self.target_network(observation)
+            predictor_output = self.predictor_network(observation)
 
+        intrinsic_reward = torch.mean((target_output - predictor_output) ** 2, dim=-1).item()
+        self.update_reward_normalizer(intrinsic_reward)
         # Normalize intrinsic reward
         normalized_reward = self.reward_normalizer.normalize(intrinsic_reward)
         return normalized_reward * self.reward_scale

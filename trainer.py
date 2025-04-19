@@ -33,6 +33,7 @@ from ray.tune.search import BasicVariantGenerator
 from environments.minigrid_wrapper import PositionBasedWrapper
 from intrinsic_motivation.count_based import CountExploration
 from intrinsic_motivation.dowham_v2 import DoWhaMIntrinsicRewardV2
+from intrinsic_motivation.rnd import RNDModule
 
 
 class CustomCallback(RLlibCallback):
@@ -176,6 +177,7 @@ class CustomEnv(EmptyEnv):
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
         self.enable_dowham_reward_v2 = kwargs.pop('enable_dowham_reward_v2', False)
         self.enable_count_based = kwargs.pop('enable_count_based', False)
+        self.enable_rnd = kwargs.pop('enable_rnd', False)
         self.direction_obs = kwargs.pop('direction_obs', True)
         self.max_steps = kwargs.pop('max_steps', 200)
         self.conv_filter = kwargs.pop('conv_filter', False)
@@ -199,6 +201,11 @@ class CustomEnv(EmptyEnv):
 
         self.states = np.full((self.width, self.height), 0)
 
+        # Later in the method, after other initializations
+        if self.enable_rnd:
+            print("RND Exploration Enabled")
+            self.rnd = RNDModule(input_dim=148, embed_dim=32,  # Match fcnet_hiddens size
+                                 hidden_size=32, reward_scale=1.0)
         if self.enable_dowham_reward_v2:
             print("Enable Dowham Reward V2")
             self.reward_range = (-1, 1)
@@ -207,20 +214,20 @@ class CustomEnv(EmptyEnv):
             print(f"Count Based Exploration Enabled")
             self.count_based = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
 
-        new_image_space = spaces.Box(
-            low=0,
-            high=255,
-            shape=(
-                self.height * self.tile_size,
-                self.width * self.tile_size,
-                3,
-            ),
-            dtype="uint8",
-        )
-
-        self.observation_space = spaces.Dict(
-            {'direction': self.observation_space.spaces['direction'], "image": new_image_space}
-        )
+        # new_image_space = spaces.Box(
+        #     low=0,
+        #     high=255,
+        #     shape=(
+        #         self.height * self.tile_size,
+        #         self.width * self.tile_size,
+        #         3,
+        #     ),
+        #     dtype="uint8",
+        # )
+        #
+        # self.observation_space = spaces.Dict(
+        #     {'direction': self.observation_space.spaces['direction'], "image": new_image_space}
+        # )
 
         print(f"Environment Type: {CustomEnv.Environments(self.env_type).name}")
 
@@ -240,6 +247,29 @@ class CustomEnv(EmptyEnv):
 
         self.intrinsic_reward = 0
         self.done = False
+
+        if self.max_door > 0:
+            # For environments with doors (crossing, four_rooms, multi_room)
+            self.observation_space = spaces.Dict({
+                'agent_pos': spaces.Box(low=0, high=max(self.width, self.height),
+                                        shape=(2,), dtype=np.int32),
+                'agent_dir': spaces.Discrete(4),
+                'goal_pos': spaces.Box(low=0, high=max(self.width, self.height),
+                                       shape=(2,), dtype=np.int32),
+                'door_pos': spaces.Box(low=0, high=max(self.width, self.height),
+                                       shape=(self.max_door, 2), dtype=np.int32),
+                'door_state': spaces.Box(low=0, high=1,
+                                         shape=(self.max_door,), dtype=np.int32)
+            })
+        else:
+            # For environments without doors (empty)
+            self.observation_space = spaces.Dict({
+                'agent_pos': spaces.Box(low=0, high=max(self.width, self.height),
+                                        shape=(2,), dtype=np.int32),
+                'agent_dir': spaces.Discrete(4),
+                'goal_pos': spaces.Box(low=0, high=max(self.width, self.height),
+                                       shape=(2,), dtype=np.int32)
+            })
 
     def _reward(self) -> float:
         """
@@ -281,17 +311,41 @@ class CustomEnv(EmptyEnv):
         #     self.intrinsic_reward *= 0.05
 
         if self.enable_count_based:
-            reward = self.count_based.update(prev_pos, action, reward, self.goal_pos)
+            self.intrinsic_reward = self.count_based.update((prev_pos[0], prev_pos[1]), action, reward, self.goal_pos)
+        if self.enable_rnd:
+            self.rnd_reward(obs)
 
         reward = reward * 0.05
         if terminated:
-            reward = self._reward()
+            reward += self._reward()
             self.termination_reward = reward
         else:
-            reward += self.intrinsic_reward
+            reward += self.intrinsic_reward * 0.05
 
         self.done = terminated
         return obs, reward, terminated, truncated, {}
+
+    def rnd_reward(self, obs):
+        # First, convert observation to a format suitable for RND
+        if isinstance(obs, dict):
+            # Flatten dict observation
+            obs_list = []
+            for key, value in obs.items():
+                if isinstance(value, (int, np.int32, np.int64)):
+                    value = np.array([value])
+                elif not isinstance(value, np.ndarray):
+                    value = np.array(value)
+                obs_list.append(value.flatten())
+            flat_obs = np.concatenate(obs_list)
+        else:
+            flat_obs = np.array(obs).flatten()
+
+        flat_obs = flat_obs.astype(np.float32)
+        self.rnd.update_obs_normalizer(flat_obs)
+        # Calculate intrinsic reward
+        self.intrinsic_reward = self.rnd.compute_intrinsic_reward(flat_obs)
+        # Update predictor network
+        self.rnd.update_predictor(flat_obs)
 
     def _gen_grid(self, width, height):
         if self.env_type == CustomEnv.Environments.crossing:
@@ -686,7 +740,7 @@ class CustomEnv(EmptyEnv):
         # degisebilecek tüm bilgileri agent a verecek bir wrapper yaz.
         obs = super().gen_obs()
 
-        if self.conv_filter:
+        if self.conv_filter or self.enable_rnd:
             obs.pop('mission')
 
         return obs
@@ -730,30 +784,29 @@ def custom_trial_name(trial):
         trial: The trial object from Ray Tune
 
     Returns:
-        str: Custom trial name including LSTM size
+        str: Custom trial name including exploration type and environment type
     """
     env_config = trial.config.get("env_config", {})
     enable_dowham_reward_v1 = env_config.get("enable_dowham_reward_v1", False)
     enable_dowham_reward_v2 = env_config.get("enable_dowham_reward_v2", False)
     enable_count_based = env_config.get("enable_count_based", False)
     enable_rnd = env_config.get("enable_rnd", False)
+    env_type = env_config.get("env_type", "unknown")
     train_batch_size = trial.config.get("train_batch_size", "unknown")
     fc = trial.config.get("model", {}).get("fcnet_hiddens", "unknown")
-    lstm = trial.config.get("model", {}).get("use_lstm", "unknown")
     grad_clip = trial.config.get("grad_clip", "unknown")
-    vf_loss_coeff = trial.config.get("vf_loss_coeff", "unknown")
-    entropy_coeff = trial.config.get("entropy_coeff", "unknown")
 
+    exploration_type = "Default"
     if enable_dowham_reward_v1:
-        return f"DoWhaMV1_batch{train_batch_size}{fc}{grad_clip}"
-    if enable_dowham_reward_v2:
-        return f"DoWhaMV2_batch{train_batch_size}Ent{entropy_coeff}VF{vf_loss_coeff}Lstm{lstm}{grad_clip}"
+        exploration_type = "DoWhaMV1"
+    elif enable_dowham_reward_v2:
+        exploration_type = "DoWhaMV2"
     elif enable_count_based:
-        return f"CountBased_batch{train_batch_size}{fc}{grad_clip}"
+        exploration_type = "CountBased"
     elif enable_rnd:
-        return f"RND_batch{train_batch_size}{fc}{grad_clip}"
-    else:
-        return f"Default_batch"
+        exploration_type = "RND"
+
+    return f"{exploration_type}_{CustomEnv.Environments(env_type).name}_batch{train_batch_size}{fc}{grad_clip}"
 
 
 if __name__ == "__main__":
@@ -966,6 +1019,7 @@ if __name__ == "__main__":
         )
         .framework("torch").resources(
             num_gpus=args.num_gpus,
+            placement_strategy="SPREAD"
         )
         .debugging(
             fake_sampler=False,
@@ -999,17 +1053,8 @@ if __name__ == "__main__":
             **copy.deepcopy(config),
             "env_config": {
                 "enable_dowham_reward_v2": False,
-                "enable_count_based": True,
-                "env_type": env_type,
-                "max_steps": args.max_steps,
-                "conv_filter": args.conv_filter,
-            },
-        },
-        {
-            **copy.deepcopy(config),
-            "env_config": {
-                "enable_dowham_reward_v2": False,
                 "enable_count_based": False,
+                "enable_rnd": False,
                 "env_type": env_type,
                 "max_steps": args.max_steps,
                 "conv_filter": args.conv_filter,
@@ -1035,7 +1080,8 @@ if __name__ == "__main__":
             num_samples=args.num_samples,
             log_to_file=True,
             resume="AUTO",
-            max_failures=5,
+            max_failures=-1,
+            name=f"PPO_default_{CustomEnv.Environments(env_type).name}",
             reuse_actors=True
         )
     elif args.run_mode == 'hyperparameter_search':
