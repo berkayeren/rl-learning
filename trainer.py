@@ -755,7 +755,7 @@ class CustomEnv(EmptyEnv):
         self.percentage_history.append(self.done)
         self.states = np.full((self.width, self.height), 0)
 
-        if self.enable_dowham_reward_v2:
+        if self.enable_dowham_reward_v2 or self.enable_dowham_reward_v1:
             self.dowham_reward.reset_episode()
 
         # if len(self.percentage_history) == 100 and self.percentage_history.count(
@@ -946,7 +946,7 @@ if __name__ == "__main__":
             lr=1e-4,  # Learning rate
             train_batch_size_per_learner=1024,
             train_batch_size=1024,  # Larger batches
-            num_sgd_iter=2,  # More SGD iterations
+            # num_sgd_iter=2,  # More SGD iterations
             grad_clip=5.0,  # Tighter gradient clipping
             # optimizer={
             #     "type": "rmsprop",
@@ -1055,26 +1055,31 @@ if __name__ == "__main__":
                 # Default PPO
                 {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
                  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
-                {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
-                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
-
-                # PPO with Count reward
-                {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
-                {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
-                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
-
-                # PPO with RND reward
-                {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
-                {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
-                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True}
+                # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v1": True, "enable_count_based": False, "enable_rnd": False},
+                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v1": False,
+                #  "enable_dowham_reward_v2": True, "enable_count_based": False, "enable_rnd": False},
+                # {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
+                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
+                #
+                # # PPO with Count reward
+                # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
+                # {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
+                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
+                #
+                # # PPO with RND reward
+                # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
+                # {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
+                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
+                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True}
             ]),
             "seed": tune.grid_search(list(range(args.num_samples))),
         }
@@ -1092,9 +1097,9 @@ if __name__ == "__main__":
             verbose=2,  # Display detailed logs
             num_samples=1,
             log_to_file=True,
-            resume="AUTO",
+            resume=False,
             max_failures=-1,
-            name=f"PPO_ALL",
+            # name=f"PPO_ALL",
             reuse_actors=False
         )
     elif args.run_mode == 'hyperparameter_search':
