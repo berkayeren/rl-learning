@@ -99,8 +99,8 @@ class CustomCallback(RLlibCallback):
             **kwargs,
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
-        episode.custom_metrics["percentage_visited"] = env.percentage_visited
-        episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
+        # episode.custom_metrics["percentage_visited"] = env.percentage_visited
+        # episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
         self.counter += 1
 
         if self.counter % 100 == 0 and torch.cuda.is_available():
@@ -112,6 +112,25 @@ class CustomCallback(RLlibCallback):
         #         env.states = np.full((env.width, env.height), 0)
         # except Exception:
         #     pass
+
+    def on_episode_end(
+            self,
+            *,
+            episode: Union[EpisodeType, EpisodeV2],
+            env_runner: Optional["EnvRunner"] = None,
+            metrics_logger: Optional[MetricsLogger] = None,
+            env: Optional[gym.Env] = None,
+            env_index: int,
+            rl_module: Optional[RLModule] = None,
+            # TODO (sven): Deprecate these args.
+            worker: Optional["EnvRunner"] = None,
+            base_env: Optional[BaseEnv] = None,
+            policies: Optional[Dict[PolicyID, Policy]] = None,
+            **kwargs,
+    ) -> None:
+        env = base_env.get_sub_environments()[env_index].unwrapped
+        episode.custom_metrics["percentage_visited"] = env.percentage_visited
+        episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
 
 
 def plot_heatmap(env, filename="visit_heatmap.png"):
@@ -206,6 +225,10 @@ class CustomEnv(EmptyEnv):
             print("RND Exploration Enabled")
             self.rnd = RNDModule(input_dim=148, embed_dim=32,  # Match fcnet_hiddens size
                                  hidden_size=32, reward_scale=1.0)
+        if self.enable_dowham_reward_v1:
+            print("Enable Dowham Reward V1")
+            self.reward_range = (0, 1)
+            self.dowham_reward = DoWhaMIntrinsicRewardV1(eta=40, H=1, tau=0.5)
         if self.enable_dowham_reward_v2:
             print("Enable Dowham Reward V2")
             self.reward_range = (-1, 1)
