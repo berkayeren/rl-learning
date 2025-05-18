@@ -14,9 +14,18 @@ import torch
 from gymnasium import spaces
 from matplotlib import pyplot as plt
 from minigrid.core.constants import COLOR_NAMES
+
+VIEW_SIZE = 7
+# Pivot at bottom-center of the egocentric view (row 6, col 3)
+PIVOT_ROW = VIEW_SIZE - 1
+PIVOT_COL = VIEW_SIZE // 2
+BASE_OFFSETS = np.array([
+    [(PIVOT_ROW - i, j - PIVOT_COL) for j in range(VIEW_SIZE)]
+    for i in range(VIEW_SIZE)
+])
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
-from minigrid.envs import EmptyEnv, MultiRoom
+from minigrid.envs import MultiRoom
 from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
@@ -31,9 +40,14 @@ from ray.tune import register_env, CheckpointConfig
 from ray.tune.search import BasicVariantGenerator
 
 from environments.minigrid_wrapper import PositionBasedWrapper
+from environments.empty import EmptyEnv
 from intrinsic_motivation.count_based import CountExploration
 from intrinsic_motivation.dowham_v2 import DoWhaMIntrinsicRewardV2
+from intrinsic_motivation.dowham_v1 import DoWhaMIntrinsicRewardV1
 from intrinsic_motivation.rnd import RNDModule
+
+import numpy as np
+from minigrid.core.constants import OBJECT_TO_IDX
 
 
 class CustomCallback(RLlibCallback):
@@ -200,6 +214,8 @@ class CustomEnv(EmptyEnv):
         self.direction_obs = kwargs.pop('direction_obs', True)
         self.max_steps = kwargs.pop('max_steps', 200)
         self.conv_filter = kwargs.pop('conv_filter', False)
+        self.is_partial_obs = kwargs.pop('is_partial_obs', True)
+        self.highlight = kwargs.pop('highlight', False)
         print(f"Enable Dowham Reward V2: {self.enable_dowham_reward_v2}")
 
         self.percentage_visited = 0.0
@@ -208,13 +224,13 @@ class CustomEnv(EmptyEnv):
         self.reward_range = (-1, 1)
         self.dowham_reward = None
         self.tile_size = 24
-        self.highlight = False
-
+        self.see_through_walls = False
         super().__init__(
             size=19,
             tile_size=self.tile_size,
             highlight=self.highlight,
             max_steps=self.max_steps,
+            see_through_walls=False,
             # render_mode="human",
             **kwargs)
 
@@ -302,36 +318,94 @@ class CustomEnv(EmptyEnv):
         # Provides better gradient between optimal and worst-case performance
         return 1.0 - 0.9 * (self.step_count / self.max_steps)
 
+    def transform_coords(self, x, y, agent_dir):
+        if agent_dir == 0:  # Right (→), no change
+            return x, y
+        elif agent_dir == 1:  # Down (↓), rotate clockwise 90°
+            return -y, x
+        elif agent_dir == 2:  # Left (←), rotate 180°
+            return -x, -y
+        elif agent_dir == 3:  # Up (↑), rotate counter-clockwise 90°
+            return y, -x
+        return None
+
+    def extract_visible_coords_from_obs(self, obs, agent_pos, agent_dir):
+        """
+        Map the agent's 7×7 egocentric type-mask to global coordinates.
+        Includes all non-unseen, non-wall cells. Uses BASE_OFFSETS (East-facing)
+        and transform_coords to rotate for any agent_dir.
+        """
+
+        # 1) Extract the raw type mask (shape VIEW_SIZE×VIEW_SIZE) and filter
+        raw_img = obs['image'] if isinstance(obs, dict) else obs
+        agent_col = 7 // 2
+        agent_row = 7 - 1
+        raw_img[agent_col, agent_row, 0] = OBJECT_TO_IDX['agent']
+        mask = raw_img[:, :, 0].T  # Transpose to (height, width)
+        valid = (mask != OBJECT_TO_IDX['unseen']) & (mask != OBJECT_TO_IDX['wall']) & (mask != OBJECT_TO_IDX['agent'])
+        coords = np.argwhere(valid)
+
+        # 2) Map each local (i,j) to global coords
+        ax, ay = agent_pos
+        visible = []
+        for i, j in coords:
+            # East-facing offset (dx,dy) from BASE_OFFSETS
+            dx, dy = BASE_OFFSETS[i, j]
+            # Rotate into actual direction
+            rdx, rdy = self.transform_coords(dx, dy, agent_dir)
+            wx, wy = ax + rdx, ay + rdy
+
+            # Boundary check
+            if 0 <= wx < self.width and 0 <= wy < self.height:
+                visible.append((int(wx), int(wy)))
+
+        return visible
+
     def step(self, action: int):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action = action
-        # current_obs = self.img_observation()
-        prev_pos = self.agent_pos
-        # prev_dir = self.agent_dir
+        current_obs_hash, current_obs = self.img_observation()
+        prev_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
+        prev_dir = self.agent_dir
         obs, reward, terminated, truncated, _ = super().step(action)
-        # next_obs = self.img_observation()
-        # next_pos = self.agent_pos
-        # next_dir = self.agent_dir
-        #
-        # if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
-        #     self.dowham_reward.update_state_visits(prev_pos, next_pos)
-        #     state_changed = current_obs != next_obs or prev_dir != next_dir
-        #     self.dowham_reward.update_usage(prev_pos, action)
-        #
-        #     self.dowham_reward.update_effectiveness(
-        #         prev_pos,
-        #         action,
-        #         next_pos,
-        #         state_changed
-        #     )
-        #
-        #     self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
-        #         prev_pos,
-        #         action,
-        #         next_pos,
-        #         state_changed
-        #     )
-        #     self.intrinsic_reward *= 0.05
+        next_obs_hash, next_obs = self.img_observation()
+        next_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
+        next_dir = self.agent_dir
+        # print(f"Agent Pos: {self.agent_pos[0]}, {self.agent_pos[1]}")
+        if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
+            curr_view = self.extract_visible_coords_from_obs(current_obs, prev_pos, prev_dir)
+            next_view = self.extract_visible_coords_from_obs(next_obs, next_pos, next_dir)
+
+            # print(f"Agent Pos: {prev_pos}, Agent Dir: {prev_dir}, Current View: {curr_view}")
+            # print(f"Agent Pos: {self.agent_pos}, Agent Dir: {self.agent_dir}, Next View: {next_view}")
+            self.dowham_reward.update_state_visits(current_obs_hash, next_obs_hash)
+            state_changed = current_obs_hash != next_obs_hash or prev_dir != next_dir
+            self.dowham_reward.update_usage(current_obs_hash, action)
+
+            self.dowham_reward.update_effectiveness(
+                current_obs_hash,
+                action,
+                next_obs_hash,
+                state_changed
+            )
+
+            if self.enable_dowham_reward_v2:
+                self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
+                    current_obs_hash,
+                    action,
+                    next_obs_hash,
+                    state_changed,
+                    curr_view,
+                    next_view,
+                    next_pos
+                )
+            else:
+                self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
+                    current_obs_hash,
+                    action,
+                    next_obs_hash,
+                    state_changed
+                )
 
         if self.enable_count_based:
             self.intrinsic_reward = self.count_based.update((prev_pos[0], prev_pos[1]), action, reward, self.goal_pos)
@@ -381,17 +455,20 @@ class CustomEnv(EmptyEnv):
             self.multi_room(width, height)
 
     def img_observation(self, size=32):
-        if self.direction_obs:
-            rgb_img = self.get_frame(
-                highlight=self.highlight, tile_size=self.tile_size
-            )
+        if not self.is_partial_obs:
+            if self.direction_obs:
+                rgb_img = self.get_frame(
+                    highlight=self.highlight, tile_size=self.tile_size
+                )
+            else:
+                agent_dir = self.agent_dir
+                self.agent_dir = 0
+                rgb_img = self.get_frame(
+                    highlight=self.highlight, tile_size=self.tile_size
+                )
+                self.agent_dir = agent_dir
         else:
-            agent_dir = self.agent_dir
-            self.agent_dir = 0
-            rgb_img = self.get_frame(
-                highlight=self.highlight, tile_size=self.tile_size
-            )
-            self.agent_dir = agent_dir
+            rgb_img = self.gen_obs()["image"]
 
         sample_hash = hashlib.sha256()
 
@@ -402,14 +479,14 @@ class CustomEnv(EmptyEnv):
         # Convert the full grid to a list for hashing
         full_grid_list = rgb_img.flatten().tolist()
 
-        to_encode = [full_grid_list]
+        to_encode = [full_grid_list, self.agent_pos, self.agent_dir]
 
         # Update the hash with each element
         for item in to_encode:
             sample_hash.update(str(item).encode("utf8"))
 
         # Return the hashed value
-        return sample_hash.hexdigest()[:size]
+        return sample_hash.hexdigest()[:size], rgb_img
 
     def crossing_env(self, width, height):
         import itertools as itt
