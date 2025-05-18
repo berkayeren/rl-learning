@@ -31,20 +31,17 @@ class DoWhaMIntrinsicRewardV1:
             self.effectiveness_counts[obs][action] += 1
 
     def calculate_bonus(self, obs, action):
-        """
-        Calculate the intrinsic reward bonus for a given action in a state.
-        """
-        U = self.usage_counts[obs].get(action, 1)  # Default to 1 to avoid division by zero
+        U = self.usage_counts[obs].get(action, 1)
         E = self.effectiveness_counts[obs].get(action, 0)
 
-        # If U == E, make the bonus small but non-zero for effective actions
-        if U == E:
-            ratio = E / (U + 1e-6)  # Add a small epsilon to avoid division by zero
-        else:
-            ratio = E / U
+        # Handle first-time effective actions
+        if U == 1 and E == 1:
+            return 1.0  # Maximum reward for first effectiveness
 
-        bonus = (self.eta ** (1 - ratio) - 1) / (self.eta - 1)
-        return max(bonus, 1e-3)  # Ensure a small positive bonus
+        ratio = E / U
+        exp_term = self.eta ** (1 - ratio)
+        bonus = (exp_term - 1) / (self.eta - 1)
+        return bonus
 
     def update_state_visits(self, current_obs, next_obs):
         """
