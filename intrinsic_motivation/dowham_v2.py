@@ -81,6 +81,8 @@ class DoWhaMIntrinsicRewardV2:
         self._state_visit_counts = {}
         self.recent_transitions = UniqueDeque(
             maxlen=max_steps // transition_divisor)  # Track recent state transitions
+        self.unseen_positions = set()
+        self.visited_positions = set()
         self.randomize_state_transition = randomize_state_transition
 
     def update_usage(self, obs, action):
@@ -126,6 +128,22 @@ class DoWhaMIntrinsicRewardV2:
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
+    def calculate_transition_uncertainty(self, obs, action):
+        key = (obs, action)
+        transitions = self.transition_stats.get(key, [])
+        if len(transitions) <= 1:
+            return 0.0
+
+        # Convert to strings or hashes if needed for high-dimensional observations
+        unique, counts = np.unique(transitions, return_counts=True)
+        probs = counts / np.sum(counts)
+        uncertainty = -np.sum(probs * np.log(probs + 1e-8))
+        max_entropy = np.log(len(probs) + 1e-8)
+        normalized_entropy = uncertainty / max_entropy if max_entropy > 0 else 0.0
+        # normalized_entropy = max(normalized_entropy, 0.0)
+        scaled_uncertainty = self.tau * normalized_entropy
+        return scaled_uncertainty
+
     def update_state_visits(self, current_obs, next_obs):
         self._state_visit_counts[next_obs] = self._state_visit_counts.get(next_obs, 0) + 1
 
@@ -142,30 +160,42 @@ class DoWhaMIntrinsicRewardV2:
             self.action_state[obs] = {}
 
         if action not in self.action_state[obs]:
-            self.action_state[obs][action] = []
+            self.action_state[obs][action] = False
 
-        self.action_state[obs][action].append(state_changed)
+        self.action_state[obs][action] = state_changed
 
-    def calculate_intrinsic_reward(self, obs, action, prev_pos, state_changed):
-        # If the agent has moved to a new position or the action is invalid, calculate intrinsic reward
-        is_recent = (obs, action) in self.recent_transitions
-        self.recent_transitions.append((obs, action))
-        state_count = self.state_visit_counts[prev_pos]
+    def calculate_intrinsic_reward(self, obs, action, next_obs, state_changed, curr_view, next_view, next_pos):
+        """
+        Calculate the intrinsic reward based on action effectiveness and state visitation.
+        """
+        self.visited_positions.add(next_pos)
+        is_novel_state = next_obs not in self.unseen_positions
+        # Compute newly seen positions using set difference for efficiency
+        curr_set = set(curr_view)
+        next_set = set(next_view)
+        newly_seen_set = next_set - curr_set - self.unseen_positions - self.visited_positions
+        newly_seen = list(newly_seen_set)
+        self.unseen_positions.update(newly_seen if len(newly_seen) != 0 else curr_set)
+        self.unseen_positions -= self.visited_positions
+        # Reward any action that results in a state change
+        if not state_changed:
+            return 0
+
+        state_count = len(self.unseen_positions) ** self.tau
+
+        if state_count == 0:
+            return 0
+
         action_bonus = self.calculate_bonus(obs, action)
-        intrinsic_reward = action_bonus / np.sqrt(state_count)
-        reward = 0.0
-
-        if state_changed:
-            reward = intrinsic_reward
-        elif self.action_state[obs][action].count(False) > 1:
-            penalty = 1 - (1 / (self.action_state[obs][action].count(False) / np.sqrt(state_count)))
-            reward = max(-abs(penalty), -1.0)  # Cap the penalty at -1.0
+        reward = action_bonus / np.sqrt(state_count)
 
         return round(reward, 5)
 
     def reset_episode(self):
         self.state_visit_counts.clear()
-        # self.usage_counts.clear()
-        # self.effectiveness_counts.clear()
+        self.usage_counts.clear()
+        self.unseen_positions.clear()
+        self.visited_positions.clear()
+        self.effectiveness_counts.clear()
         self.recent_transitions.clear()
         self.action_state.clear()
