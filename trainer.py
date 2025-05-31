@@ -926,6 +926,7 @@ if __name__ == "__main__":
     ], default="empty")
     parser.add_argument('--run_mode', type=str, choices=['experiment', 'hyperparameter_search'], required=True,
                         help='Specify whether to run an experiment or hyperparameter search')
+    parser.add_argument('--trail_name', type=str, help='Custom trail name', default=None)
 
     args = parser.parse_args()
 
@@ -1197,10 +1198,10 @@ if __name__ == "__main__":
             verbose=2,  # Display detailed logs
             num_samples=1,
             log_to_file=True,
-            resume=False,
+            resume=True,
             max_failures=-1,
-            # name=f"PPO_ALL",
-            reuse_actors=False
+            reuse_actors=False,
+            name=args.trail_name if hasattr(args, 'trail_name') and args.trail_name else None
         )
     elif args.run_mode == 'hyperparameter_search':
         trail = tune.Tuner(
