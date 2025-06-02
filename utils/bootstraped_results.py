@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sqlite3
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -240,6 +241,7 @@ if __name__ == "__main__":
     parser.add_argument("--bin_size", type=int, help="Bin size for timestep grouping (optional)")
     parser.add_argument("--ci_method", choices=['bootstrap', 'std_error'], default='bootstrap',
                         help="Method to calculate confidence intervals")
+    parser.add_argument("--sqlite_db", help="Path to SQLite database file to store results (optional)")
     args = parser.parse_args()
 
     # Load data from each experiment
@@ -252,6 +254,19 @@ if __name__ == "__main__":
 
     # Extract evaluation metrics
     metrics_data = extract_evaluation_metrics(experiments, args.metric)
+
+    # Optionally write results to SQLite
+    if args.sqlite_db:
+        conn = sqlite3.connect(args.sqlite_db)
+        for exp_name, df in metrics_data.items():
+            # Add metric name as a column
+            df = df.copy()
+            df['metric'] = args.metric
+            # Clean table name: replace problematic chars
+            table_name = exp_name.replace('.', '_').replace('-', '_').replace(' ', '_')
+            df.to_sql(table_name, conn, if_exists='replace', index=False)
+        conn.close()
+        print(f"Results written to SQLite database: {args.sqlite_db}")
 
     # 1) Compute per‐experiment CI over time (fills mean, lower_bound, upper_bound)
     metrics_data = calculate_confidence_intervals_over_time(
