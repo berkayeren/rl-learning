@@ -1,5 +1,4 @@
 import argparse
-import json
 import os
 import sqlite3
 
@@ -10,20 +9,25 @@ from scipy import stats
 from tqdm import tqdm
 
 
-def load_experiment_data(exp_dir, metric):
-    """Load evaluation data from experiment directories."""
+def load_experiment_data(exp_dir, metric, min_timesteps=50_000_000):
+    """Load evaluation data from experiment directories, stopping at min_timesteps if provided."""
     result_directory = os.path.expanduser('~') + "/ray_results"
     full_path = os.path.join(result_directory, exp_dir)
-    # Use result.json instead of progress.csv (which may have corrupted columns)
     result_json = os.path.join(full_path, "result.json")
     if os.path.exists(result_json):
         data = []
+        reached = False
         with open(result_json, 'r') as f:
             lines = f.readlines()
         for line in tqdm(lines):
             if line.strip():
                 try:
-                    data.append(json.loads(line))
+                    entry = json.loads(line)
+                    # Only append if timesteps_total is not past min_timesteps
+                    if 'timesteps_total' in entry and entry['timesteps_total'] >= min_timesteps:
+                        reached = True
+                        break
+                    data.append(entry)
                 except json.JSONDecodeError:
                     print(f"Error decoding JSON line: {line.strip()}")
                     continue
@@ -242,13 +246,15 @@ if __name__ == "__main__":
     parser.add_argument("--ci_method", choices=['bootstrap', 'std_error'], default='bootstrap',
                         help="Method to calculate confidence intervals")
     parser.add_argument("--sqlite_db", help="Path to SQLite database file to store results (optional)")
+    parser.add_argument("--min_timesteps", type=int, default=50_000_000,
+                        help="Minimum timesteps to load from result.json (default: 50M)")
     args = parser.parse_args()
 
     # Load data from each experiment
     experiments = {}
     for exp_dir in args.exp_dirs:
         print(f"Loading data from {exp_dir[:150]}...")
-        df = load_experiment_data(exp_dir, args.metric)
+        df = load_experiment_data(exp_dir, args.metric, min_timesteps=args.min_timesteps)
         if df is not None:
             experiments[os.path.basename(exp_dir)] = df
 
@@ -258,13 +264,35 @@ if __name__ == "__main__":
     # Optionally write results to SQLite
     if args.sqlite_db:
         conn = sqlite3.connect(args.sqlite_db)
+        all_rows = []
         for exp_name, df in metrics_data.items():
             # Add metric name as a column
             df = df.copy()
             df['metric'] = args.metric
-            # Clean table name: replace problematic chars
-            table_name = exp_name.replace('.', '_').replace('-', '_').replace(' ', '_')
-            df.to_sql(table_name, conn, if_exists='replace', index=False)
+            # Try to extract seed from params.json in the experiment directory
+            import json
+
+            exp_dir = None
+            for d in args.exp_dirs:
+                if os.path.basename(d) == exp_name:
+                    exp_dir = d
+                    break
+            seed = None
+            if exp_dir:
+                params_path = os.path.join(exp_dir, 'params.json')
+                if os.path.exists(params_path):
+                    try:
+                        with open(params_path, 'r') as f:
+                            params = json.load(f)
+                        seed = params.get('seed', None)
+                    except Exception:
+                        pass
+            df['seed'] = seed
+            df['experiment'] = exp_name
+            all_rows.append(df)
+        if all_rows:
+            all_df = pd.concat(all_rows, ignore_index=True)
+            all_df.to_sql('experiment_results', conn, if_exists='replace', index=False)
         conn.close()
         print(f"Results written to SQLite database: {args.sqlite_db}")
 
