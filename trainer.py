@@ -1189,8 +1189,8 @@ if __name__ == "__main__":
         trail = tune.run(
             "PPO",  # Specify the RLlib algorithm
             config=search_space,
-            metric="env_runners/episode_reward_mean",
-            mode="max",  # Minimizing episode length
+            metric="env_runners/episode_len_mean",
+            mode="min",
             stop={
                 "timesteps_total": args.timesteps_total,
             },
