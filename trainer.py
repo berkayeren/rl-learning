@@ -1155,8 +1155,8 @@ if __name__ == "__main__":
             "env_config": tune.grid_search([
                 # Default PPO
                 {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v1": False, "enable_dowham_reward_v2": False, "enable_count_based": True,
-                 "enable_rnd": False},
+                 "enable_dowham_reward_v1": False, "enable_dowham_reward_v2": False, "enable_count_based": False,
+                 "enable_rnd": True},
                 # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
                 #  "enable_dowham_reward_v1": True, "enable_count_based": False, "enable_rnd": False},
                 # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
