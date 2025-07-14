@@ -70,6 +70,7 @@ class UniqueDeque(deque):
 
 class DoWhaMIntrinsicRewardV2:
     def __init__(self, eta, H, tau, randomize_state_transition=False, max_steps=200, transition_divisor=1):
+        print("DoWhaM V2 Intrinsic Reward Initialized")
         self.action_state = {}
         self.eta = eta
         self.H = H
@@ -168,6 +169,9 @@ class DoWhaMIntrinsicRewardV2:
         """
         Calculate the intrinsic reward based on action effectiveness and state visitation.
         """
+        # Check if the agent's new position was previously unseen
+        was_unseen_position = next_pos in self.unseen_positions
+
         self.visited_positions.add(next_pos)
         is_novel_state = next_obs not in self.unseen_positions
         # Compute newly seen positions using set difference for efficiency
@@ -175,21 +179,41 @@ class DoWhaMIntrinsicRewardV2:
         next_set = set(next_view)
         newly_seen_set = next_set - curr_set - self.unseen_positions - self.visited_positions
         newly_seen = list(newly_seen_set)
+
+        # Check if there are newly seen positions
+        has_newly_seen = len(newly_seen) > 0
+
         self.unseen_positions.update(newly_seen if len(newly_seen) != 0 else curr_set)
         self.unseen_positions -= self.visited_positions
-        # Reward any action that results in a state change
+
+        # Give reward if:
+        # 1. Action results in state change AND
+        # 2. Either there are newly seen positions OR the agent moved to a previously unseen position
         if not state_changed:
             return 0
 
+        # Calculate base action bonus
+        action_bonus = self.calculate_bonus(obs, action)
         state_count = len(self.unseen_positions) ** self.tau
 
         if state_count == 0:
+            state_count = 1  # Avoid division by zero
+
+        base_reward = action_bonus / np.sqrt(state_count)
+
+        # Enhanced reward structure
+        if was_unseen_position:
+            # Give substantial bonus for reaching a subgoal (previously unseen position)
+            subgoal_bonus = 2.0 * action_bonus  # Double the action bonus for subgoal achievement
+            total_reward = base_reward + subgoal_bonus
+        elif has_newly_seen:
+            # Standard reward for discovering new positions
+            total_reward = base_reward
+        else:
+            # No reward if neither condition is met
             return 0
 
-        action_bonus = self.calculate_bonus(obs, action)
-        reward = action_bonus / np.sqrt(state_count)
-
-        return round(reward, 5)
+        return round(total_reward, 5)
 
     def reset_episode(self):
         self.state_visit_counts.clear()
