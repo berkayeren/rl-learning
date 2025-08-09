@@ -26,7 +26,7 @@ BASE_OFFSETS = np.array([
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
@@ -235,7 +235,7 @@ class CustomEnv(EmptyEnv):
             **kwargs)
 
         self.states = np.full((self.width, self.height), 0)
-
+        self.reward_range = (-1, 1)
         # Later in the method, after other initializations
         if self.enable_rnd:
             print("RND Exploration Enabled")
@@ -243,12 +243,10 @@ class CustomEnv(EmptyEnv):
                                  hidden_size=32, reward_scale=1.0)
         if self.enable_dowham_reward_v1:
             print("Enable Dowham Reward V1")
-            self.reward_range = (0, 1)
             self.dowham_reward = DoWhaMIntrinsicRewardV1(eta=40, H=1, tau=0.5)
         if self.enable_dowham_reward_v2:
             print("Enable Dowham Reward V2")
-            self.reward_range = (-1, 1)
-            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta=40, H=1, tau=0.5)
+            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta=40, H=1, tau=1.0)
         if self.enable_count_based:
             print(f"Count Based Exploration Enabled")
             self.count_based = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
@@ -316,7 +314,7 @@ class CustomEnv(EmptyEnv):
         """
         # Ensures minimum reward of 0.5 even at max steps
         # Provides better gradient between optimal and worst-case performance
-        return 1.0 - 0.9 * (self.step_count / self.max_steps)
+        return 1.0
 
     def transform_coords(self, x, y, agent_dir):
         if agent_dir == 0:  # Right (→), no change
@@ -412,12 +410,13 @@ class CustomEnv(EmptyEnv):
         if self.enable_rnd:
             self.rnd_reward(obs)
 
-        reward = reward * 0.05
         if terminated:
-            reward += self._reward()
+            reward = self._reward()
             self.termination_reward = reward
         else:
-            reward += self.intrinsic_reward * 0.05
+            if self.intrinsic_reward == 0:
+                self.intrinsic_reward = -0.1
+            reward = self.intrinsic_reward * 0.05
 
         self.done = terminated
         return obs, reward, terminated, truncated, {}
@@ -605,14 +604,17 @@ class CustomEnv(EmptyEnv):
                 if i + 1 < 2:
                     self.grid.vert_wall(xR, yT, room_h)
                     pos = (xR, self._rand_int(yT + 1, yB))
-                    self.grid.set(pos[0], pos[1], Door(color="yellow", is_open=False))
+                    # self.grid.set(pos[0], pos[1], Door(color="yellow", is_open=False))
 
                 # Bottom wall and door
                 if j + 1 < 2:
                     self.grid.horz_wall(xL, yB, room_w)
                     pos = (self._rand_int(xL + 1, xR), yB)
-                    self.grid.set(pos[0], pos[1], Door(color="yellow", is_open=False))
-
+                    # self.grid.set(pos[0], pos[1], Door(color="yellow", is_open=False))
+        self.grid.set(9, 4, Door(color="yellow", is_open=False))
+        self.grid.set(9, 13, Door(color="yellow", is_open=False))
+        self.grid.set(13, 9, Door(color="yellow", is_open=False))
+        self.grid.set(4, 9, Door(color="yellow", is_open=False))
         # Randomize the player start position and orientation
         if self._agent_default_pos is not None:
             self.agent_pos = self._agent_default_pos
@@ -924,10 +926,15 @@ if __name__ == "__main__":
         "four_rooms",
         "multi_room",
     ], default="empty")
+    parser.add_argument('--obs_type', type=str, choices=['conv', 'position', 'flat'], default='position',
+                        help='Observation wrapper type: conv, position, or flat')
     parser.add_argument('--run_mode', type=str, choices=['experiment', 'hyperparameter_search'], required=True,
                         help='Specify whether to run an experiment or hyperparameter search')
     parser.add_argument('--trail_name', type=str, help='Custom trail name', default=None)
-
+    parser.add_argument('--enable_dowham_reward_v1', action='store_true', )
+    parser.add_argument('--enable_dowham_reward_v2', action='store_true', )
+    parser.add_argument('--enable_count_based', action='store_true', )
+    parser.add_argument('--enable_rnd', action='store_true', help='Enable RND exploration')
     args = parser.parse_args()
 
     ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True,
@@ -940,134 +947,45 @@ if __name__ == "__main__":
 
     env_type = CustomEnv.Environments[args.environment]
 
-    if args.conv_filter:
+    if args.obs_type == 'conv':
+        print("Observation wrapper type is conv")
         register_env("CustomPlaygroundCrossingEnv-v0",
                      lambda config:
                      RGBImgObsWrapper(FullyObsWrapper(CustomEnv(**config))))
-
         env = RGBImgObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
         obs = env.reset()
-    else:
+    elif args.obs_type == 'position':
+        print("Observation wrapper type is position")
         register_env("CustomPlaygroundCrossingEnv-v0",
                      lambda config:
                      PositionBasedWrapper(CustomEnv(**config)))
-
         env = PositionBasedWrapper(CustomEnv(env_type=env_type))
         obs = env.reset()
+    elif args.obs_type == 'flat':
+        print("Observation wrapper type is flat")
+        register_env("CustomPlaygroundCrossingEnv-v0",
+                     lambda config:
+                     FlatObsWrapper(FullyObsWrapper(CustomEnv(**config))))
+        env = FlatObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
+        obs = env.reset()
 
-        # config = (
-    #     PPOConfig()
-    #     .training(
-    #         gamma=0.99,  # Discount factor
-    #         lr=0.0008679592813302736,  # Learning rate
-    #         grad_clip=4.488759919509276,  # Gradient clipping
-    #         grad_clip_by="global_norm",
-    #         train_batch_size=128,  # Training batch size
-    #         num_epochs=30,  # Number of training epochs
-    #         minibatch_size=128,  # Mini-batch size for SGD
-    #         shuffle_batch_per_epoch=True,
-    #         use_critic=True,
-    #         use_gae=True,  # Generalized Advantage Estimation
-    #         use_kl_loss=True,
-    #         kl_coeff=0.16108743826129673,  # KL divergence coefficient
-    #         kl_target=0.01,  # Target KL divergence
-    #         vf_loss_coeff=0.02633906005324078,  # Value function loss coefficient
-    #         entropy_coeff=0.1,  # Entropy coefficient for exploration
-    #         clip_param=0.25759466534505526,  # PPO clipping parameter
-    #         vf_clip_param=10.0,  # Clipping for value function updates
-    #         optimizer={
-    #             "type": "RMSProp",
-    #         },
-    #         model={
-    #             "fcnet_hiddens": [1024, 1024],
-    #             "fcnet_activation": "tanh",
-    #             "post_fcnet_hiddens": [512, 512],
-    #             "post_fcnet_activation": "tanh",
-    #             "conv_filters": [
-    #                 [32, [8, 8], 8],  # 32 filters, 8x8 kernel, stride 8
-    #                 [128, [11, 11], 1],  # 128 filters, 11x11 kernel, stride 1
-    #             ],
-    #             # "conv_filters": [
-    #             #     [16, [8, 8], 4],
-    #             #     [32, [4, 4], 2],
-    #             #     [256, [11, 11], 1],
-    #             # ],
-    #             "conv_activation": "relu",
-    #             "vf_share_layers": False,
-    #             "framestack": True,
-    #             "dim": 84,  # Resized observation dimension
-    #             "grayscale": False,
-    #             "zero_mean": True,
-    #         }
-    #     ).learners(
-    #         num_learners=2,
-    #         num_gpus_per_learner=args.num_gpus / 6,
-    #     )
-    #     .experimental(
-    #         _disable_preprocessor_api=True, )
-    #     .environment(
-    #         env="CustomPlaygroundCrossingEnv-v0",
-    #         env_config={
-    #             "enable_dowham_reward_v2": True,
-    #             "env_type": env_type
-    #         },
-    #         disable_env_checking=True,
-    #         normalize_actions=True,
-    #         clip_actions=False,
-    #     )
-    #     .env_runners(
-    #         num_env_runners=args.num_rollout_workers,
-    #         num_envs_per_env_runner=args.num_envs_per_worker,
-    #         num_cpus_per_env_runner=0.5,
-    #         num_gpus_per_env_runner=args.num_gpus / 6,
-    #         batch_mode="complete_episodes",
-    #     )
-    #     .framework("torch")
-    #     .debugging(
-    #         fake_sampler=False,
-    #     ).api_stack(
-    #         enable_rl_module_and_learner=False,
-    #         enable_env_runner_and_connector_v2=False,
-    #     ).callbacks(CustomCallback)
-    #     .evaluation(
-    #         evaluation_interval=20,
-    #         evaluation_duration=10,
-    #         evaluation_duration_unit="episodes",
-    #         evaluation_parallel_to_training=False,
-    #         evaluation_sample_timeout_s=120,
-    #     )
-    # )
     config = (
         PPOConfig()
         .training(
             use_critic=True,
             use_kl_loss=False,
-            # vtrace=True,
+            use_gae=True,  # Generalized Advantage Estimation
             gamma=0.99,  # Discount factor
             lr=1e-4,  # Learning rate
             train_batch_size_per_learner=1024,
             train_batch_size=1024,  # Larger batches
-            # num_sgd_iter=2,  # More SGD iterations
-            grad_clip=5.0,  # Tighter gradient clipping
-            # optimizer={
-            #     "type": "rmsprop",
-            #     "momentum": 0.0,
-            #     "epsilon": 0.01,
-            # },
-            # opt_type="rmsprop",
-            # epsilon=0.01,
-            # momentum=0.0,
-            vf_loss_coeff=0.5,  # Value function loss coefficient
-            entropy_coeff=0.005,
+            grad_clip=10,  # Tighter gradient clipping
+            vf_loss_coeff=0.67,  # Value function loss coefficient
+            entropy_coeff=0.001,
             model={
-                "fcnet_hiddens": [32, 32],
-                "post_fcnet_hiddens": [32],
-                "fcnet_activation": "relu",
-                # "conv_filters": [
-                #     [32, [3, 3], 2],
-                #     [64, [3, 3], 2],
-                #     [64, [3, 3], 2],
-                # ],
+                "fcnet_hiddens": [256, 256],  # Reduced from [512, 512]
+                "post_fcnet_hiddens": [256, 128],  # Smaller post-processing
+                "fcnet_activation": "relu",  # More stable than ReLU
                 "conv_filters": [
                     [32, [3, 3], 2],  # First Conv Layer: 32 filters, 3x3 kernel, stride 2
                     [32, [3, 3], 2],  # Second Conv Layer: 32 filters, 3x3 kernel, stride 2
@@ -1100,23 +1018,15 @@ if __name__ == "__main__":
             },
             disable_env_checking=True,
             is_atari=False,
-            # observation_space=env.observation_space,
-            # action_space=env.action_space,
+            observation_space=env.observation_space,
+            action_space=env.action_space,
         )
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=1,
             num_gpus_per_env_runner=0,
-            # rollout_fragment_length=256,
-            batch_mode="complete_episodes",  # Better for IMPALA
-            # explore=True,
-            # exploration_config={
-            #     "type": "EpsilonGreedy",
-            #     "initial_epsilon": 1.0,
-            #     "final_epsilon": 0.01,
-            #     "epsilon_timesteps": 1_000_000,
-            # }
+            batch_mode="complete_episodes",
         )
         .framework("torch").resources(
             num_gpus=args.num_gpus,
@@ -1129,7 +1039,7 @@ if __name__ == "__main__":
             enable_env_runner_and_connector_v2=False,
         ).callbacks(CustomCallback)
         .evaluation(
-            evaluation_interval=200,
+            evaluation_interval=50,
             evaluation_duration=10,
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,
@@ -1154,34 +1064,15 @@ if __name__ == "__main__":
             **copy.deepcopy(config),
             "env_config": tune.grid_search([
                 # Default PPO
-                {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                 "enable_dowham_reward_v1": False, "enable_dowham_reward_v2": False, "enable_count_based": False,
-                 "enable_rnd": True},
-                # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v1": True, "enable_count_based": False, "enable_rnd": False},
-                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v1": False,
-                #  "enable_dowham_reward_v2": True, "enable_count_based": False, "enable_rnd": False},
-                # {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
-                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": False},
-                #
-                # # PPO with Count reward
-                # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
-                # {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
-                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": True, "enable_rnd": False},
-                #
-                # # PPO with RND reward
-                # {"env_type": 1, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
-                # {"env_type": 2, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True},
-                # {"env_type": 3, "max_steps": args.max_steps, "conv_filter": args.conv_filter,
-                #  "enable_dowham_reward_v2": False, "enable_count_based": False, "enable_rnd": True}
+                {
+                    "env_type": CustomEnv.Environments[args.environment],
+                    "max_steps": args.max_steps,
+                    "conv_filter": args.conv_filter,
+                    "enable_dowham_reward_v1": args.enable_dowham_reward_v1,
+                    "enable_dowham_reward_v2": args.enable_dowham_reward_v2,
+                    "enable_count_based": args.enable_count_based,
+                    "enable_rnd": args.enable_rnd,
+                },
             ]),
             "seed": tune.grid_search(list(range(args.num_samples))),
         }
@@ -1210,36 +1101,27 @@ if __name__ == "__main__":
             param_space={
                 **copy.deepcopy(config),
                 "env_config": {
-                    "enable_dowham_reward_v2": False,
-                    "env_type": env_type,
-                    "max_steps": args.max_steps,
+                    "enable_dowham_reward_v2": True,
+                    "env_type": CustomEnv.Environments[args.environment],
+                    "max_steps": tune.choice([100, 300, 500, 700, 1444]),
                 },
-                "num_sgd_iter": tune.grid_search([3, 5, 10]),
+                # === EXPLORATION AND REGULARIZATION ===
+                "entropy_coeff": tune.loguniform(1e-4, 5e-2),  # Encourage exploration
+                "vf_loss_coeff": tune.uniform(0.1, 1.0),  # Value function importance
+                "grad_clip": tune.uniform(0.5, 10.0),  # Gradient clipping for stability
+                "use_gae": tune.choice([True, False]),  # Generalized Advantage Estimation
             },
             tune_config=tune.TuneConfig(
-                metric="env_runners/episode_reward_mean",  # Optimize for return
-                mode="max",  # Maximize reward
+                metric="env_runners/episode_len_mean",
+                mode="min",
                 num_samples=args.num_samples,
-                reuse_actors=True,
+                reuse_actors=False,
                 search_alg=BasicVariantGenerator(),
                 # Use Bayesian optimization
             ),
             run_config=train.RunConfig(stop={"timesteps_total": args.timesteps_total},
                                        failure_config=FailureConfig(max_failures=-1)),
         )
-        # trail = tune.Tuner.restore(
-        #     path="/Users/berkayeren/ray_results/IMPALA_2025-03-05_21-39-47",
-        #     trainable="IMPALA",
-        #     param_space={
-        #         **copy.deepcopy(config),
-        #         "env_config": {
-        #             "enable_dowham_reward_v2": False,
-        #             "env_type": env_type,
-        #             "max_steps": 200,
-        #         },
-        #         "vf_loss_coeff": tune.grid_search([0.1, 0.2, 0.5]),
-        #     },
-        # )
 
         results = trail.fit()
         best_trial = results.get_best_result(metric="env_runners/episode_len_mean", mode="min")
