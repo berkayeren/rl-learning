@@ -211,7 +211,7 @@ class DoWhaMIntrinsicRewardV2:
             total_reward = base_reward
         else:
             # No reward if neither condition is met
-            return 0
+            return -0.1
 
         return round(total_reward, 5)
 

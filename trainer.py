@@ -410,13 +410,17 @@ class CustomEnv(EmptyEnv):
         if self.enable_rnd:
             self.rnd_reward(obs)
 
+        # --- Basic shaping: per-step penalty + success bonus, plus intrinsic on top ---
+        shaped_reward = -1 / self.max_steps
+
         if terminated:
-            reward = self._reward()
-            self.termination_reward = reward
-        else:
-            if self.intrinsic_reward == 0:
-                self.intrinsic_reward = -0.1
-            reward = self.intrinsic_reward * 0.05
+            shaped_reward += self._reward()
+            self.termination_reward = self._reward()
+
+        # Always add intrinsic reward (scaled), regardless of termination
+        shaped_reward += self.intrinsic_reward * 0.05
+
+        reward = shaped_reward
 
         self.done = terminated
         return obs, reward, terminated, truncated, {}
