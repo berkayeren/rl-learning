@@ -144,12 +144,12 @@ def get_trainer_config(
                     "fcnet_hiddens": [1024, 1024],
                     "post_fcnet_activation": "tanh",
                     "use_lstm": True,
-                    "lstm_cell_size": 256,
+                    "lstm_cell_size": 512,
                     "max_seq_len": 20,
                     "lstm_use_prev_action": True,
                     "lstm_use_prev_reward": True,
                     "vf_share_layers": False,
-                    "post_fcnet_hiddens": [1024],
+                    "post_fcnet_hiddens": [1024, 1024],
                 },
                 gamma=0.99,  # Discount factor
                 lr=0.00025,  # Learning rate from the best config

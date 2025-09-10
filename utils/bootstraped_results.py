@@ -9,11 +9,25 @@ from scipy import stats
 from tqdm import tqdm
 
 
-def load_experiment_data(exp_dir, metric, min_timesteps=50_000_000):
+def load_experiment_data(exp_dir, metric, min_timesteps=50_000_000, seed=None):
     """Load evaluation data from experiment directories, stopping at min_timesteps if provided."""
     result_directory = os.path.expanduser('~') + "/ray_results"
     full_path = os.path.join(result_directory, exp_dir)
     result_json = os.path.join(full_path, "result.json")
+
+    # Extract seed from params.json
+    if seed is None:
+        params_path = os.path.join(full_path, 'params.json')
+        if os.path.exists(params_path):
+            try:
+                with open(params_path, 'r') as f:
+                    params = json.load(f)
+                seed = params.get('seed', None)
+            except Exception as e:
+                print(f"Error reading seed from {params_path}: {e}")
+        else:
+            print(f"params.json not found in {full_path}")
+
     if os.path.exists(result_json):
         data = []
         reached = False
@@ -31,13 +45,17 @@ def load_experiment_data(exp_dir, metric, min_timesteps=50_000_000):
                 except json.JSONDecodeError:
                     print(f"Error decoding JSON line: {line.strip()}")
                     continue
-        return pd.DataFrame(data)
+
+        df = pd.DataFrame(data)
+        # Add seed as a column to the dataframe
+        df['seed'] = seed
+        return df
     else:
         print("result.json not found in", full_path)
         return None
 
 
-def extract_evaluation_metrics(experiments, metric_name, timestep_column="timesteps_total"):
+def extract_evaluation_metrics(experiments, metric_name, iteration_column="training_iteration"):
     """Extract evaluation metrics from experiments using nested JSON structure.
        It retrieves the metric from ["evaluation"]["env_runners"][f"{metric_name}_mean"].
     """
@@ -60,8 +78,11 @@ def extract_evaluation_metrics(experiments, metric_name, timestep_column="timest
                 return np.nan
 
             df["value"] = df.apply(extract_value, axis=1)
-            sub = df[[timestep_column, "value"]].dropna()
-            sub = sub.rename(columns={timestep_column: "timestep"})
+            # Include seed column if it exists
+            columns_to_keep = [iteration_column, "value", "timesteps_total", "seed"]
+
+            sub = df[columns_to_keep].dropna()
+            sub = sub.rename(columns={iteration_column: "iteration"})
             metrics_data[exp_name] = sub
         else:
             print(f"Metric {metric_name} not found in {exp_name}")
@@ -116,42 +137,42 @@ def calculate_bootstrap_ci_for_metrics(metrics_data, num_bootstrap_samples=1000,
 def calculate_confidence_intervals_over_time(metrics_data, bin_size=None, method='bootstrap',
                                              num_bootstrap_samples=1000, confidence_level=0.95):
     """
-    Calculate confidence intervals for metrics at each timestep or binned timesteps.
+    Calculate confidence intervals for metrics at each iteration or binned iterations.
 
     Args:
-        metrics_data: Dictionary of dataframes with timesteps and metric values
-        bin_size: If provided, bin timesteps into groups of this size
+        metrics_data: Dictionary of dataframes with iterations and metric values
+        bin_size: If provided, bin iterations into groups of this size
         method: Method to calculate confidence intervals ('bootstrap' or 'std_error')
         num_bootstrap_samples: Number of bootstrap samples if using bootstrap method
         confidence_level: Confidence level for intervals
 
     Returns:
-        Dictionary of processed dataframes with timesteps, means, and confidence intervals
+        Dictionary of processed dataframes with iterations, means, and confidence intervals
     """
     results = {}
 
     for exp_name, df in metrics_data.items():
         # Force using our renamed columns
-        timestep_col = "timestep"
+        iteration_col = "iteration"
         metric_col = "value"
 
         # If bin_size is provided, bin the data
         if bin_size:
-            df['bin'] = (df[timestep_col] // bin_size) * bin_size
+            df['bin'] = (df[iteration_col] // bin_size) * bin_size
             grouped = df.groupby('bin')
-            timesteps = np.array(grouped.first().index)
+            iterations = np.array(grouped.first().index)
             values = [group[metric_col].values for _, group in grouped]
         else:
-            # Process each unique timestep
-            grouped = df.groupby(timestep_col)
-            timesteps = np.array(grouped.groups.keys())
+            # Process each unique iteration
+            grouped = df.groupby(iteration_col)
+            iterations = np.array(grouped.groups.keys())
             values = [group[metric_col].values for _, group in grouped]
 
         means = np.array([np.mean(v) for v in values])
         lower_bounds = np.zeros_like(means)
         upper_bounds = np.zeros_like(means)
 
-        # Calculate confidence intervals for each timestep
+        # Calculate confidence intervals for each iteration
         for i, vals in enumerate(tqdm(values, desc=f"Bootstrapping CI for {exp_name}")):
             if len(vals) <= 1:
                 # Not enough data for CI calculation
@@ -164,7 +185,7 @@ def calculate_confidence_intervals_over_time(metrics_data, bin_size=None, method
                 bootstrap_means = np.zeros(num_bootstrap_samples)
                 n = len(vals)
 
-                for j in tqdm(range(num_bootstrap_samples), desc=f"Bootstrap samples for t={i}", leave=False):
+                for j in tqdm(range(num_bootstrap_samples), desc=f"Bootstrap samples for iter={i}", leave=False):
                     sample = np.random.choice(vals, size=n, replace=True)
                     bootstrap_means[j] = np.mean(sample)
 
@@ -183,14 +204,14 @@ def calculate_confidence_intervals_over_time(metrics_data, bin_size=None, method
 
         # Create result dataframe
         result_df = pd.DataFrame({
-            'timestep': timesteps,
+            'iteration': iterations,
             'mean': means,
             'lower_bound': lower_bounds,
             'upper_bound': upper_bounds
         })
 
-        # Sort by timestep to ensure correct plotting order
-        result_df = result_df.sort_values('timestep')
+        # Sort by iteration to ensure correct plotting order
+        result_df = result_df.sort_values('iteration')
         results[exp_name] = result_df
 
     return results
@@ -199,22 +220,22 @@ def calculate_confidence_intervals_over_time(metrics_data, bin_size=None, method
 def calculate_average_confidence_intervals_over_time(metrics_data, bin_size=None,
                                                      num_bootstrap_samples=1000,
                                                      confidence_level=0.95):
-    """Compute overall mean ± bootstrap CI across runs at each timestep/bin."""
-    # 1) Extract each run’s mean‐series
+    """Compute overall mean ± bootstrap CI across runs at each iteration/bin."""
+    # 1) Extract each run's mean‐series
     run_means = {}
     for exp_name, df in metrics_data.items():
-        # df now has columns ['timestep','mean','lower_bound','upper_bound']
-        s = df.set_index('timestep')['mean']
+        # df now has columns ['iteration','mean','lower_bound','upper_bound']
+        s = df.set_index('iteration')['mean']
         run_means[exp_name] = s
 
-    # 2) Align on union of all timesteps, then fill missing per‐run means
-    all_steps = sorted(set().union(*(s.index for s in run_means.values())))
+    # 2) Align on union of all iterations, then fill missing per‐run means
+    all_iterations = sorted(set().union(*(s.index for s in run_means.values())))
     runs_df = pd.DataFrame(
-        {exp: run_means[exp].reindex(all_steps) for exp in run_means},
-        index=all_steps
+        {exp: run_means[exp].reindex(all_iterations) for exp in run_means},
+        index=all_iterations
     ).sort_index().ffill().bfill()
 
-    # 3) Bootstrap across runs at each timestep
+    # 3) Bootstrap across runs at each iteration
     means, lower_bounds, upper_bounds = [], [], []
     for vals in runs_df.values:
         m = vals.mean()
@@ -228,7 +249,7 @@ def calculate_average_confidence_intervals_over_time(metrics_data, bin_size=None
         upper_bounds.append(ub)
 
     return pd.DataFrame({
-        'timestep': all_steps,
+        'iteration': all_iterations,
         'mean': means,
         'lower_bound': lower_bounds,
         'upper_bound': upper_bounds
@@ -242,7 +263,7 @@ if __name__ == "__main__":
     parser.add_argument("--samples", type=int, default=1000, help="Number of bootstrap samples")
     parser.add_argument("--confidence", type=float, default=0.95, help="Confidence level")
     parser.add_argument("--output", help="Output directory for results")
-    parser.add_argument("--bin_size", type=int, help="Bin size for timestep grouping (optional)")
+    parser.add_argument("--bin_size", type=int, help="Bin size for iteration grouping (optional)")
     parser.add_argument("--ci_method", choices=['bootstrap', 'std_error'], default='bootstrap',
                         help="Method to calculate confidence intervals")
     parser.add_argument("--sqlite_db", help="Path to SQLite database file to store results (optional)")
@@ -252,11 +273,16 @@ if __name__ == "__main__":
 
     # Load data from each experiment
     experiments = {}
+    seed = 0
     for exp_dir in args.exp_dirs:
         print(f"Loading data from {exp_dir[:150]}...")
-        df = load_experiment_data(exp_dir, args.metric, min_timesteps=args.min_timesteps)
+        df = load_experiment_data(exp_dir, args.metric, min_timesteps=args.min_timesteps, seed=seed)
+        seed += 1  # Increment seed for each experiment
         if df is not None:
-            experiments[os.path.basename(exp_dir)] = df
+            # Use strip to remove trailing slashes, then get basename
+            exp_name = os.path.basename(exp_dir.rstrip('/'))
+            experiments[exp_name] = df
+        del df
 
     # Extract evaluation metrics
     metrics_data = extract_evaluation_metrics(experiments, args.metric)
@@ -269,27 +295,10 @@ if __name__ == "__main__":
             # Add metric name as a column
             df = df.copy()
             df['metric'] = args.metric
-            # Try to extract seed from params.json in the experiment directory
-            import json
-
-            exp_dir = None
-            for d in args.exp_dirs:
-                if os.path.basename(d) == exp_name:
-                    exp_dir = d
-                    break
-            seed = None
-            if exp_dir:
-                params_path = os.path.join(exp_dir, 'params.json')
-                if os.path.exists(params_path):
-                    try:
-                        with open(params_path, 'r') as f:
-                            params = json.load(f)
-                        seed = params.get('seed', None)
-                    except Exception:
-                        pass
-            df['seed'] = seed
             df['experiment'] = exp_name
+            # Seed is already in the dataframe from extract_evaluation_metrics
             all_rows.append(df)
+
         if all_rows:
             all_df = pd.concat(all_rows, ignore_index=True)
             all_df.to_sql('experiment_results', conn, if_exists='replace', index=False)
@@ -315,7 +324,7 @@ if __name__ == "__main__":
 
     # 3) Plot single mean curve + its bootstrap CI
     fig, ax = plt.subplots(figsize=(12, 8))
-    ts = avg_df['timestep']
+    iterations = avg_df['iteration']
     m = avg_df['mean']
     lb = avg_df['lower_bound']
     ub = avg_df['upper_bound']
@@ -325,15 +334,15 @@ if __name__ == "__main__":
     ci_fill = '#aec7e8'  # Lighter blue for CI fill
     ci_line = '#4a90e2'  # Medium blue for CI bounds
 
-    ax.fill_between(ts, lb, ub, color=ci_fill, alpha=0.5,
+    ax.fill_between(iterations, lb, ub, color=ci_fill, alpha=0.5,
                     label=f'{int(100 * args.confidence)}% CI', zorder=1)
-    ax.plot(ts, lb, linestyle='--', color=ci_line, linewidth=2, zorder=2, label='Lower CI')
-    ax.plot(ts, ub, linestyle='--', color=ci_line, linewidth=2, zorder=2, label='Upper CI')
-    ax.plot(ts, m, color=color, linewidth=3, zorder=3, label='Mean')
+    ax.plot(iterations, lb, linestyle='--', color=ci_line, linewidth=2, zorder=2, label='Lower CI')
+    ax.plot(iterations, ub, linestyle='--', color=ci_line, linewidth=2, zorder=2, label='Upper CI')
+    ax.plot(iterations, m, color=color, linewidth=3, zorder=3, label='Mean')
 
-    ax.set_xlabel('Environment Steps')
+    ax.set_xlabel('Training Iterations')
     ax.set_ylabel(args.metric)
-    ax.set_title(f'{args.metric} Over Time (Mean ± {int(100 * args.confidence)}% CI)')
+    ax.set_title(f'{args.metric} Over Training Iterations (Mean ± {int(100 * args.confidence)}% CI)')
     ax.legend(loc='best')
     ax.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()

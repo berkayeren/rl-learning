@@ -129,22 +129,6 @@ class DoWhaMIntrinsicRewardV2:
         bonus = (exp_term - 1) / (self.eta - 1)
         return bonus
 
-    def calculate_transition_uncertainty(self, obs, action):
-        key = (obs, action)
-        transitions = self.transition_stats.get(key, [])
-        if len(transitions) <= 1:
-            return 0.0
-
-        # Convert to strings or hashes if needed for high-dimensional observations
-        unique, counts = np.unique(transitions, return_counts=True)
-        probs = counts / np.sum(counts)
-        uncertainty = -np.sum(probs * np.log(probs + 1e-8))
-        max_entropy = np.log(len(probs) + 1e-8)
-        normalized_entropy = uncertainty / max_entropy if max_entropy > 0 else 0.0
-        # normalized_entropy = max(normalized_entropy, 0.0)
-        scaled_uncertainty = self.tau * normalized_entropy
-        return scaled_uncertainty
-
     def update_state_visits(self, current_obs, next_obs):
         self._state_visit_counts[next_obs] = self._state_visit_counts.get(next_obs, 0) + 1
 
@@ -200,26 +184,26 @@ class DoWhaMIntrinsicRewardV2:
             state_count = 1  # Avoid division by zero
 
         base_reward = action_bonus / np.sqrt(state_count)
-
+        total_reward = 0.0
         # Enhanced reward structure
-        if was_unseen_position:
+        if has_newly_seen:
             # Give substantial bonus for reaching a subgoal (previously unseen position)
-            subgoal_bonus = 2.0 * action_bonus  # Double the action bonus for subgoal achievement
+            subgoal_bonus = 10 * action_bonus  # Double the action bonus for subgoal achievement
             total_reward = base_reward + subgoal_bonus
-        elif has_newly_seen:
+        elif was_unseen_position:
             # Standard reward for discovering new positions
             total_reward = base_reward
-        else:
-            # No reward if neither condition is met
-            return -0.1
+        # elif self.usage_counts[obs].get(action, 1) > 1:
+        #     # No reward if neither condition is met
+        #     return -0.1
 
         return round(total_reward, 5)
 
     def reset_episode(self):
         self.state_visit_counts.clear()
-        self.usage_counts.clear()
+        # self.usage_counts.clear()
         self.unseen_positions.clear()
         self.visited_positions.clear()
-        self.effectiveness_counts.clear()
-        self.recent_transitions.clear()
-        self.action_state.clear()
+        # self.effectiveness_counts.clear()
+        # self.recent_transitions.clear()
+        # self.action_state.clear()

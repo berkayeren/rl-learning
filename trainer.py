@@ -30,7 +30,7 @@ from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
-from ray.rllib.algorithms import PPOConfig
+from ray.rllib.algorithms import PPOConfig, ImpalaConfig
 from ray.rllib.callbacks.callbacks import RLlibCallback
 from ray.rllib.core.rl_module import RLModule
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
@@ -51,7 +51,6 @@ from minigrid.core.constants import OBJECT_TO_IDX
 
 
 class CustomCallback(RLlibCallback):
-    counter = 1
 
     def on_episode_start(
             self,
@@ -93,39 +92,10 @@ class CustomCallback(RLlibCallback):
     ) -> None:
         env = base_env.get_sub_environments()[env_index].unwrapped
         episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
+        episode.custom_metrics["shaped_reward"] = env.shaped_reward
         episode.custom_metrics["step_done"] = env.done
         episode.custom_metrics[env.actions(env.action).name] += 1
         episode.custom_metrics["termination_reward"] = env.termination_reward
-
-    def on_episode_created(
-            self,
-            *,
-            episode: Union[EpisodeType, EpisodeV2],
-            env_runner: Optional["EnvRunner"] = None,
-            metrics_logger: Optional[MetricsLogger] = None,
-            env: Optional[gym.Env] = None,
-            env_index: int,
-            rl_module: Optional[RLModule] = None,
-            # TODO (sven): Deprecate these args.
-            worker: Optional["EnvRunner"] = None,
-            base_env: Optional[BaseEnv] = None,
-            policies: Optional[Dict[PolicyID, Policy]] = None,
-            **kwargs,
-    ) -> None:
-        env = base_env.get_sub_environments()[env_index].unwrapped
-        # episode.custom_metrics["percentage_visited"] = env.percentage_visited
-        # episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
-        self.counter += 1
-
-        if self.counter % 100 == 0 and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        # try:
-        #     if self.counter % 100 == 0:
-        #         plot_heatmap(env, f"heatmaps/heat_map{env_index}{self.counter}.png")
-        #         env.states = np.full((env.width, env.height), 0)
-        # except Exception:
-        #     pass
 
     def on_episode_end(
             self,
@@ -197,14 +167,8 @@ class CustomEnv(EmptyEnv):
         four_rooms = 2
         multi_room = 3
 
-    class NavigationOnlyActions(IntEnum):
-        # Turn left, turn right, move forward
-        left = 0
-        right = 1
-        forward = 2
-        done = 6
-
     def __init__(self, **kwargs):
+        self.shaped_reward = 0
         self.termination_reward = 0
         self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
         self.enable_dowham_reward_v1 = kwargs.pop('enable_dowham_reward_v1', False)
@@ -216,55 +180,53 @@ class CustomEnv(EmptyEnv):
         self.conv_filter = kwargs.pop('conv_filter', False)
         self.is_partial_obs = kwargs.pop('is_partial_obs', True)
         self.highlight = kwargs.pop('highlight', False)
-        print(f"Enable Dowham Reward V2: {self.enable_dowham_reward_v2}")
-
         self.percentage_visited = 0.0
         self.percentage_history = collections.deque(maxlen=100)
         self.action = None
         self.reward_range = (-1, 1)
         self.dowham_reward = None
-        self.tile_size = 24
+        self.tile_size = kwargs.pop('tile_size', 12)
         self.see_through_walls = False
+        self.size = kwargs.pop('size', 19)
+        self.seed_sequence = np.random.SeedSequence()
+
         super().__init__(
-            size=19,
+            size=self.size,
             tile_size=self.tile_size,
             highlight=self.highlight,
             max_steps=self.max_steps,
             see_through_walls=False,
-            # render_mode="human",
+            agent_view_size=7,
             **kwargs)
+
+        print(
+            f"Custom Env {self.size}x{self.size} is used from {CustomEnv.__module__} with env type {self.env_type} and max steps {self.max_steps} \n"
+            f"Intrinsic Rewards - DoWhaM V1: {self.enable_dowham_reward_v1}, \n"
+            f"                    DoWhaM V2: {self.enable_dowham_reward_v2}, \n"
+            f"                    Count Based: {self.enable_count_based}, \n"
+            f"                    RND: {self.enable_rnd}")
 
         self.states = np.full((self.width, self.height), 0)
         self.reward_range = (-1, 1)
+        self.is_intrinsic_reward_enabled = False
         # Later in the method, after other initializations
         if self.enable_rnd:
             print("RND Exploration Enabled")
             self.rnd = RNDModule(input_dim=148, embed_dim=32,  # Match fcnet_hiddens size
                                  hidden_size=32, reward_scale=1.0)
+            self.is_intrinsic_reward_enabled = True
         if self.enable_dowham_reward_v1:
             print("Enable Dowham Reward V1")
             self.dowham_reward = DoWhaMIntrinsicRewardV1(eta=40, H=1, tau=0.5)
+            self.is_intrinsic_reward_enabled = True
         if self.enable_dowham_reward_v2:
             print("Enable Dowham Reward V2")
-            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta=40, H=1, tau=1.0)
+            self.dowham_reward = DoWhaMIntrinsicRewardV2(eta=40, H=1, tau=0.5)
+            self.is_intrinsic_reward_enabled = True
         if self.enable_count_based:
             print(f"Count Based Exploration Enabled")
             self.count_based = CountExploration(self, gamma=0.99, epsilon=0.1, alpha=0.1)
-
-        # new_image_space = spaces.Box(
-        #     low=0,
-        #     high=255,
-        #     shape=(
-        #         self.height * self.tile_size,
-        #         self.width * self.tile_size,
-        #         3,
-        #     ),
-        #     dtype="uint8",
-        # )
-        #
-        # self.observation_space = spaces.Dict(
-        #     {'direction': self.observation_space.spaces['direction'], "image": new_image_space}
-        # )
+            self.is_intrinsic_reward_enabled = True
 
         print(f"Environment Type: {CustomEnv.Environments(self.env_type).name}")
 
@@ -285,35 +247,14 @@ class CustomEnv(EmptyEnv):
         self.intrinsic_reward = 0
         self.done = False
 
-        if self.max_door > 0:
-            # For environments with doors (crossing, four_rooms, multi_room)
-            self.observation_space = spaces.Dict({
-                'agent_pos': spaces.Box(low=0, high=max(self.width, self.height),
-                                        shape=(2,), dtype=np.int32),
-                'agent_dir': spaces.Discrete(4),
-                'goal_pos': spaces.Box(low=0, high=max(self.width, self.height),
-                                       shape=(2,), dtype=np.int32),
-                'door_pos': spaces.Box(low=0, high=max(self.width, self.height),
-                                       shape=(self.max_door, 2), dtype=np.int32),
-                'door_state': spaces.Box(low=0, high=1,
-                                         shape=(self.max_door,), dtype=np.int32)
-            })
-        else:
-            # For environments without doors (empty)
-            self.observation_space = spaces.Dict({
-                'agent_pos': spaces.Box(low=0, high=max(self.width, self.height),
-                                        shape=(2,), dtype=np.int32),
-                'agent_dir': spaces.Discrete(4),
-                'goal_pos': spaces.Box(low=0, high=max(self.width, self.height),
-                                       shape=(2,), dtype=np.int32)
-            })
+    @staticmethod
+    def _gen_mission():
+        return "get to the green goal square"
 
     def _reward(self) -> float:
         """
         Compute the reward to be given upon success
         """
-        # Ensures minimum reward of 0.5 even at max steps
-        # Provides better gradient between optimal and worst-case performance
         return 1.0
 
     def transform_coords(self, x, y, agent_dir):
@@ -362,14 +303,16 @@ class CustomEnv(EmptyEnv):
     def step(self, action: int):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action = action
-        current_obs_hash, current_obs = self.img_observation()
+        current_obs_hash = self.hash()
+        current_obs = self.gen_obs()["image"]
         prev_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
         prev_dir = self.agent_dir
         obs, reward, terminated, truncated, _ = super().step(action)
-        next_obs_hash, next_obs = self.img_observation()
+        next_obs_hash = self.hash()
+        next_obs = obs["image"]
         next_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
         next_dir = self.agent_dir
-        # print(f"Agent Pos: {self.agent_pos[0]}, {self.agent_pos[1]}")
+
         if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
             curr_view = self.extract_visible_coords_from_obs(current_obs, prev_pos, prev_dir)
             next_view = self.extract_visible_coords_from_obs(next_obs, next_pos, next_dir)
@@ -407,20 +350,22 @@ class CustomEnv(EmptyEnv):
 
         if self.enable_count_based:
             self.intrinsic_reward = self.count_based.update((prev_pos[0], prev_pos[1]), action, reward, self.goal_pos)
+
         if self.enable_rnd:
             self.rnd_reward(obs)
 
         # --- Basic shaping: per-step penalty + success bonus, plus intrinsic on top ---
-        shaped_reward = -1 / self.max_steps
+        self.shaped_reward = 0
 
         if terminated:
-            shaped_reward += self._reward()
+            self.shaped_reward += self._reward()
             self.termination_reward = self._reward()
 
-        # Always add intrinsic reward (scaled), regardless of termination
-        shaped_reward += self.intrinsic_reward * 0.05
+        if self.is_intrinsic_reward_enabled:
+            # Always add intrinsic reward (scaled), regardless of termination
+            self.shaped_reward += self.intrinsic_reward * 0.05
 
-        reward = shaped_reward
+        reward += self.shaped_reward
 
         self.done = terminated
         return obs, reward, terminated, truncated, {}
@@ -473,23 +418,20 @@ class CustomEnv(EmptyEnv):
         else:
             rgb_img = self.gen_obs()["image"]
 
+        # Return the hashed value
+        return self.hash_(size=size), rgb_img
+
+    def hash_(self, size=16):
+        """Compute a hash that uniquely identifies the current state of the environment.
+        :param size: Size of the hashing
+        """
         sample_hash = hashlib.sha256()
 
-        # from PIL import Image
-        # img = Image.fromarray(rgb_img)
-        # img.save("debug_image.png")
-
-        # Convert the full grid to a list for hashing
-        full_grid_list = rgb_img.flatten().tolist()
-
-        to_encode = [full_grid_list, self.agent_pos, self.agent_dir]
-
-        # Update the hash with each element
+        to_encode = [self.grid.encode().tolist(), self.agent_pos]
         for item in to_encode:
             sample_hash.update(str(item).encode("utf8"))
 
-        # Return the hashed value
-        return sample_hash.hexdigest()[:size], rgb_img
+        return sample_hash.hexdigest()[:size]
 
     def crossing_env(self, width, height):
         import itertools as itt
@@ -567,14 +509,14 @@ class CustomEnv(EmptyEnv):
         self.grid.wall_rect(0, 0, width, height)
         # Get grid size from environment
         grid_size = self.width  # Assuming width == height
-        # self.put_obj(Goal(), 17, 17)
-        # self.goal_pos = (17, 17)
+        self.put_obj(Goal(), 17, 17)
+        self.goal_pos = (17, 17)
         # Randomly assign a new goal position (excluding (1,1))
-        while True:
-            self.goal_pos = (np.random.randint(1, grid_size - 2), np.random.randint(1, grid_size - 2))
-            if self.goal_pos != (1, 1):  # Ensure it's not the starting position
-                self.put_obj(Goal(), self.goal_pos[0], self.goal_pos[1])
-                break
+        # while True:
+        #     self.goal_pos = (np.random.randint(1, grid_size - 2), np.random.randint(1, grid_size - 2))
+        #     if self.goal_pos != (1, 1):  # Ensure it's not the starting position
+        #         self.put_obj(Goal(), self.goal_pos[0], self.goal_pos[1])
+        #         break
 
     def four_rooms(self, width, height):
         self.max_door = 4
@@ -841,15 +783,8 @@ class CustomEnv(EmptyEnv):
         return True
 
     def gen_obs(self):
-        #
-        # [x,y, direction] [goal_X, goal_Y, goal,]
-        # degisebilecek tüm bilgileri agent a verecek bir wrapper yaz.
         obs = super().gen_obs()
-
-        if self.conv_filter or self.enable_rnd:
-            obs.pop('mission')
-
-        return obs
+        return {**obs}
 
     def reset(self, **kwargs):
         total_size = self.width * self.height
@@ -864,18 +799,14 @@ class CustomEnv(EmptyEnv):
         if self.enable_dowham_reward_v2 or self.enable_dowham_reward_v1:
             self.dowham_reward.reset_episode()
 
-        # if len(self.percentage_history) == 100 and self.percentage_history.count(
-        #         True) >= 90 and self.env_type != CustomEnv.Environments.multi_room:
-        #     self.env_type = (self.env_type + 1) % len(CustomEnv.Environments)
-        #     print(f"Environment Type Changed to: {CustomEnv.Environments(self.env_type).name}")
-
         if self.env_type == CustomEnv.Environments.multi_room:
             self.agent_pos = (2, 1)
         else:
             self.agent_pos = (1, 1)
 
         self.agent_dir = 0
-        obs, _ = super().reset(**kwargs)
+
+        obs, _ = super().reset(**{**kwargs, "seed": np.random.randint(0, 2 ** 31 - 1, dtype=int)})
         self.intrinsic_reward = 0
         self.termination_reward = 0
         self.done = False
@@ -912,7 +843,7 @@ def custom_trial_name(trial):
     elif enable_rnd:
         exploration_type = "RND"
 
-    return f"{exploration_type}_{CustomEnv.Environments(env_type).name}_batch{train_batch_size}{fc}{grad_clip}"
+    return f"{exploration_type}_{CustomEnv.Environments(env_type).name}_batch{train_batch_size}{fc}Dowham{enable_dowham_reward_v2}"
 
 
 if __name__ == "__main__":
@@ -973,22 +904,49 @@ if __name__ == "__main__":
         env = FlatObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
         obs = env.reset()
 
+    # Determine if any intrinsic motivation method is enabled
+    no_intrinsic_motivation = not (args.enable_dowham_reward_v1 or args.enable_dowham_reward_v2 or
+                                   args.enable_count_based or args.enable_rnd)
+
+    # Apply specific hyperparameters for four_rooms environment with no intrinsic motivation
+    if env_type == CustomEnv.Environments.four_rooms and no_intrinsic_motivation and False:
+        print(f"Using specific hyperparameters for {env_type.name} with no intrinsic motivation")
+        training_config = {
+            "gamma": 0.9993,
+            "train_batch_size": args.num_rollout_workers * args.num_envs_per_worker * args.max_steps,
+            "num_epochs": 20,
+            "num_sgd_iter": 20,
+            "minibatch_size": 4096,
+            "vf_loss_coeff": 0.6,
+            "entropy_coeff": 0.005,
+            "lambda_": 0.98,
+            "use_critic": True,
+            "use_kl_loss": True,
+            "use_gae": True,
+            "lr": 1e-4,
+            "grad_clip": 10,
+        }
+    else:
+        print(f"Using default hyperparameters for {env_type.name} ")
+        # Default configuration for other cases
+        training_config = {
+            "gamma": 0.9993,
+            "train_batch_size": 1024,  # Larger batch for stable gradients
+            "minibatch_size": 512,
+            "use_critic": True,
+            "use_gae": True,
+            "lr": 1e-4,
+            "vf_loss_coeff": 0.67,
+            "entropy_coeff": 0.001,
+        }
+
     config = (
         PPOConfig()
         .training(
-            use_critic=True,
-            use_kl_loss=False,
-            use_gae=True,  # Generalized Advantage Estimation
-            gamma=0.99,  # Discount factor
-            lr=1e-4,  # Learning rate
-            train_batch_size_per_learner=1024,
-            train_batch_size=1024,  # Larger batches
-            grad_clip=10,  # Tighter gradient clipping
-            vf_loss_coeff=0.67,  # Value function loss coefficient
-            entropy_coeff=0.001,
+            **training_config,
             model={
                 "fcnet_hiddens": [256, 256],  # Reduced from [512, 512]
-                "post_fcnet_hiddens": [256, 128],  # Smaller post-processing
+                "post_fcnet_hiddens": [256],  # Smaller post-processing
                 "fcnet_activation": "relu",  # More stable than ReLU
                 "conv_filters": [
                     [32, [3, 3], 2],  # First Conv Layer: 32 filters, 3x3 kernel, stride 2
@@ -1002,10 +960,8 @@ if __name__ == "__main__":
                 "framestack": False,
                 "grayscale": False,
                 "custom_preprocessor": None,
-                "zero_mean": False,  # Normalize inputs with dim
                 "use_lstm": False,  # Add recurrent layer for temporal dependencies
                 "lstm_cell_size": 128,
-                "max_seq_len": 33,
             }
         ).learners(
             num_gpus_per_learner=0.8 if args.num_gpus > 0 else 0,
@@ -1028,9 +984,10 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=1,
+            num_cpus_per_env_runner=0.25,
             num_gpus_per_env_runner=0,
             batch_mode="complete_episodes",
+            rollout_fragment_length="auto",
         )
         .framework("torch").resources(
             num_gpus=args.num_gpus,
@@ -1043,13 +1000,15 @@ if __name__ == "__main__":
             enable_env_runner_and_connector_v2=False,
         ).callbacks(CustomCallback)
         .evaluation(
-            evaluation_interval=50,
+            evaluation_interval=0,
             evaluation_duration=10,
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,
             evaluation_sample_timeout_s=120,
         ).fault_tolerance(
             restart_failed_env_runners=True
+        ).reporting(
+            min_time_s_per_iteration=30
         )
     )
 
@@ -1091,7 +1050,7 @@ if __name__ == "__main__":
             },
             checkpoint_config=checkpoint_config,
             trial_name_creator=custom_trial_name,  # Custom trial name
-            verbose=2,  # Display detailed logs
+            verbose=3,  # Display detailed logs
             num_samples=1,
             log_to_file=True,
             resume=True,
@@ -1105,15 +1064,24 @@ if __name__ == "__main__":
             param_space={
                 **copy.deepcopy(config),
                 "env_config": {
-                    "enable_dowham_reward_v2": True,
+                    "enable_dowham_reward_v2": False,
+                    "enable_dowham_reward_v1": False,
+                    "enable_count_based": False,
+                    "enable_rnd": False,
                     "env_type": CustomEnv.Environments[args.environment],
-                    "max_steps": tune.choice([100, 300, 500, 700, 1444]),
+                    "max_steps": 1444,
                 },
+                "gamma": tune.choice([0.99, 0.9997]),
+                "lambda_": tune.uniform(0.95, 0.99),  # GAE lambda
+                "train_batch_size": tune.choice([1024, 2048, 4096]),  # Batch size for training
+                "num_epochs": tune.choice([10, 20, 30]),  # Number of epochs per training iteration
+                "vf_loss_coeff": tune.uniform(0.1, 1.0),  # Value function loss coefficient
+                "entropy_coeff": tune.loguniform(5e-4, 2e-2),  # Entropy coefficient for exploration
+
                 # === EXPLORATION AND REGULARIZATION ===
-                "entropy_coeff": tune.loguniform(1e-4, 5e-2),  # Encourage exploration
-                "vf_loss_coeff": tune.uniform(0.1, 1.0),  # Value function importance
-                "grad_clip": tune.uniform(0.5, 10.0),  # Gradient clipping for stability
-                "use_gae": tune.choice([True, False]),  # Generalized Advantage Estimation
+                # "entropy_coeff": tune.loguniform(1e-4, 5e-2),  # Encourage exploration
+                # "vf_loss_coeff": tune.uniform(0.1, 1.0),  # Value function importance
+                # "grad_clip": tune.uniform(0.5, 10.0),  # Gradient clipping for stability
             },
             tune_config=tune.TuneConfig(
                 metric="env_runners/episode_len_mean",
