@@ -79,7 +79,6 @@ class DoWhaMIntrinsicRewardV2:
         self.max_steps = max_steps
         self.effectiveness_counts = {}
         self.state_visit_counts = {}
-        self._state_visit_counts = {}
         self.recent_transitions = UniqueDeque(
             maxlen=max_steps // transition_divisor)  # Track recent state transitions
         self.unseen_positions = set()
@@ -105,7 +104,7 @@ class DoWhaMIntrinsicRewardV2:
         if state_changed:
             self.effectiveness_counts[obs][action] += 1
 
-        self.update_state_transition(obs, action, state_changed)
+        # self.update_state_transition(obs, action, state_changed)
 
     def _calculate_bonus(self, obs, action):
         U = self.usage_counts[obs].get(action, 1)
@@ -130,8 +129,6 @@ class DoWhaMIntrinsicRewardV2:
         return bonus
 
     def update_state_visits(self, current_obs, next_obs):
-        self._state_visit_counts[next_obs] = self._state_visit_counts.get(next_obs, 0) + 1
-
         if current_obs not in self.state_visit_counts:
             self.state_visit_counts[current_obs] = 1
 
@@ -157,8 +154,7 @@ class DoWhaMIntrinsicRewardV2:
         was_unseen_position = next_pos in self.unseen_positions
 
         self.visited_positions.add(next_pos)
-        is_novel_state = next_obs not in self.unseen_positions
-        # Compute newly seen positions using set difference for efficiency
+
         curr_set = set(curr_view)
         next_set = set(next_view)
         newly_seen_set = next_set - curr_set - self.unseen_positions - self.visited_positions

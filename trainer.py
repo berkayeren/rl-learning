@@ -26,7 +26,7 @@ BASE_OFFSETS = np.array([
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Goal, Lava, Wall, Door
 from minigrid.envs import MultiRoom
-from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper
+from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper, RGBImgPartialObsWrapper, ImgObsWrapper
 from ray import tune, train
 from ray.air import FailureConfig
 from ray.rllib import BaseEnv, Policy
@@ -156,7 +156,7 @@ def plot_heatmap(env, filename="visit_heatmap.png"):
     plt.grid(False)
 
     # Save the image
-    plt.savefig(filename)
+    plt.savefig("/Users/berkayeren/PycharmProjects/rl-learning/heatmaps/" + filename)
     plt.close()
 
 
@@ -255,7 +255,7 @@ class CustomEnv(EmptyEnv):
         """
         Compute the reward to be given upon success
         """
-        return 1.0
+        return 10 - 9 * (self.step_count / self.max_steps)
 
     def transform_coords(self, x, y, agent_dir):
         if agent_dir == 0:  # Right (→), no change
@@ -303,24 +303,19 @@ class CustomEnv(EmptyEnv):
     def step(self, action: int):
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action = action
-        current_obs_hash = self.hash()
         current_obs = self.gen_obs()["image"]
+        current_obs_hash = self.hash_(current_obs)
         prev_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
         prev_dir = self.agent_dir
         obs, reward, terminated, truncated, _ = super().step(action)
-        next_obs_hash = self.hash()
+        next_obs_hash = self.hash_()
         next_obs = obs["image"]
         next_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
         next_dir = self.agent_dir
 
         if self.enable_dowham_reward_v1 or self.enable_dowham_reward_v2:
-            curr_view = self.extract_visible_coords_from_obs(current_obs, prev_pos, prev_dir)
-            next_view = self.extract_visible_coords_from_obs(next_obs, next_pos, next_dir)
-
-            # print(f"Agent Pos: {prev_pos}, Agent Dir: {prev_dir}, Current View: {curr_view}")
-            # print(f"Agent Pos: {self.agent_pos}, Agent Dir: {self.agent_dir}, Next View: {next_view}")
             self.dowham_reward.update_state_visits(current_obs_hash, next_obs_hash)
-            state_changed = current_obs_hash != next_obs_hash or prev_dir != next_dir
+            state_changed = current_obs_hash != next_obs_hash or prev_pos != next_pos
             self.dowham_reward.update_usage(current_obs_hash, action)
 
             self.dowham_reward.update_effectiveness(
@@ -331,6 +326,9 @@ class CustomEnv(EmptyEnv):
             )
 
             if self.enable_dowham_reward_v2:
+                curr_view = self.extract_visible_coords_from_obs(current_obs, prev_pos, prev_dir)
+                next_view = self.extract_visible_coords_from_obs(next_obs, next_pos, next_dir)
+
                 self.intrinsic_reward = self.dowham_reward.calculate_intrinsic_reward(
                     current_obs_hash,
                     action,
@@ -421,13 +419,21 @@ class CustomEnv(EmptyEnv):
         # Return the hashed value
         return self.hash_(size=size), rgb_img
 
-    def hash_(self, size=16):
+    def hash_(self, current_obs=None, size=16):
         """Compute a hash that uniquely identifies the current state of the environment.
         :param size: Size of the hashing
         """
         sample_hash = hashlib.sha256()
 
-        to_encode = [self.grid.encode().tolist(), self.agent_pos]
+        image = current_obs
+
+        if current_obs is None:
+            grid, vis_mask = self.gen_obs_grid()
+
+            image = grid.encode(vis_mask)
+
+        to_encode = [image.tolist(), ]
+
         for item in to_encode:
             sample_hash.update(str(item).encode("utf8"))
 
@@ -787,6 +793,7 @@ class CustomEnv(EmptyEnv):
         return {**obs}
 
     def reset(self, **kwargs):
+        plot_heatmap(self)
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)
@@ -886,8 +893,8 @@ if __name__ == "__main__":
         print("Observation wrapper type is conv")
         register_env("CustomPlaygroundCrossingEnv-v0",
                      lambda config:
-                     RGBImgObsWrapper(FullyObsWrapper(CustomEnv(**config))))
-        env = RGBImgObsWrapper(FullyObsWrapper(CustomEnv(env_type=env_type)))
+                     ImgObsWrapper(RGBImgPartialObsWrapper(CustomEnv(**config), tile_size=12)))
+        env = ImgObsWrapper(RGBImgPartialObsWrapper(CustomEnv(env_type=env_type), tile_size=12))
         obs = env.reset()
     elif args.obs_type == 'position':
         print("Observation wrapper type is position")
@@ -908,61 +915,84 @@ if __name__ == "__main__":
     no_intrinsic_motivation = not (args.enable_dowham_reward_v1 or args.enable_dowham_reward_v2 or
                                    args.enable_count_based or args.enable_rnd)
 
-    # Apply specific hyperparameters for four_rooms environment with no intrinsic motivation
-    if env_type == CustomEnv.Environments.four_rooms and no_intrinsic_motivation and False:
-        print(f"Using specific hyperparameters for {env_type.name} with no intrinsic motivation")
-        training_config = {
-            "gamma": 0.9993,
-            "train_batch_size": args.num_rollout_workers * args.num_envs_per_worker * args.max_steps,
-            "num_epochs": 20,
-            "num_sgd_iter": 20,
-            "minibatch_size": 4096,
-            "vf_loss_coeff": 0.6,
-            "entropy_coeff": 0.005,
-            "lambda_": 0.98,
-            "use_critic": True,
-            "use_kl_loss": True,
-            "use_gae": True,
-            "lr": 1e-4,
-            "grad_clip": 10,
-        }
-    else:
-        print(f"Using default hyperparameters for {env_type.name} ")
-        # Default configuration for other cases
-        training_config = {
-            "gamma": 0.9993,
-            "train_batch_size": 1024,  # Larger batch for stable gradients
-            "minibatch_size": 512,
-            "use_critic": True,
-            "use_gae": True,
-            "lr": 1e-4,
-            "vf_loss_coeff": 0.67,
-            "entropy_coeff": 0.001,
-        }
-
     config = (
         PPOConfig()
         .training(
-            **training_config,
-            model={
-                "fcnet_hiddens": [256, 256],  # Reduced from [512, 512]
-                "post_fcnet_hiddens": [256],  # Smaller post-processing
-                "fcnet_activation": "relu",  # More stable than ReLU
-                "conv_filters": [
-                    [32, [3, 3], 2],  # First Conv Layer: 32 filters, 3x3 kernel, stride 2
-                    [32, [3, 3], 2],  # Second Conv Layer: 32 filters, 3x3 kernel, stride 2
-                    [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
-                    [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
-                    [32, [3, 3], 2],  # Third Conv Layer: 32 filters, 3x3 kernel, stride 2
-                ] if args.conv_filter else None,
-                "conv_activation": "elu",
-                "vf_share_layers": False,
-                "framestack": False,
-                "grayscale": False,
-                "custom_preprocessor": None,
-                "use_lstm": False,  # Add recurrent layer for temporal dependencies
-                "lstm_cell_size": 128,
-            }
+            use_critic=True,
+            use_gae=True,
+            use_kl_loss=True,
+            kl_coeff=0.2,
+            kl_target=0.01,
+            vf_loss_coeff=0.5,
+            entropy_coeff=0.001,
+            clip_param=0.3,
+            vf_clip_param=10.0,
+            entropy_coeff_schedule=None,
+            lr_schedule=None,
+            lr=1e-3,
+            lambda_=0.95,
+            gamma=0.99,
+            num_epochs=10,
+            model={'fcnet_hiddens': [1024, 1024],
+                   'fcnet_activation': 'tanh',
+                   'fcnet_weights_initializer': None,
+                   'fcnet_weights_initializer_config': None,
+                   'fcnet_bias_initializer': None,
+                   'fcnet_bias_initializer_config': None,
+                   'conv_activation': 'relu',
+                   'conv_kernel_initializer': None,
+                   'conv_kernel_initializer_config': None,
+                   'conv_bias_initializer': None,
+                   'conv_bias_initializer_config': None,
+                   'conv_transpose_kernel_initializer': None,
+                   'conv_transpose_kernel_initializer_config': None,
+                   'conv_transpose_bias_initializer': None,
+                   'conv_transpose_bias_initializer_config': None,
+                   'post_fcnet_hiddens': [1024],
+                   'post_fcnet_activation': 'relu',
+                   'post_fcnet_weights_initializer': None,
+                   'post_fcnet_weights_initializer_config': None,
+                   'post_fcnet_bias_initializer': None,
+                   'post_fcnet_bias_initializer_config': None,
+                   'free_log_std': False,
+                   'log_std_clip_param': 20.0,
+                   'no_final_linear': False,
+                   'vf_share_layers': False,
+                   'use_lstm': True,
+                   'max_seq_len': 20,
+                   'lstm_cell_size': 1024,
+                   'lstm_use_prev_action': False,
+                   'lstm_use_prev_reward': False,
+                   'lstm_weights_initializer': None,
+                   'lstm_weights_initializer_config': None,
+                   'lstm_bias_initializer': None,
+                   'lstm_bias_initializer_config': None,
+                   '_time_major': False,
+                   'use_attention': False,
+                   'attention_num_transformer_units': 1,
+                   'attention_dim': 64,
+                   'attention_num_heads': 1,
+                   'attention_head_dim': 32,
+                   'attention_memory_inference': 50,
+                   'attention_memory_training': 50,
+                   'attention_position_wise_mlp_dim': 32,
+                   'attention_init_gru_gate_bias': 2.0,
+                   'attention_use_n_prev_actions': 0,
+                   'attention_use_n_prev_rewards': 0,
+                   'framestack': True,
+                   'dim': 88,
+                   'grayscale': False,
+                   'zero_mean': True,
+                   'custom_model': None,
+                   'custom_model_config': {},
+                   'custom_action_dist': None,
+                   'custom_preprocessor': None,
+                   'encoder_latent_dim': None,
+                   'always_check_shapes': False,
+                   'lstm_use_prev_action_reward': -1,
+                   '_use_default_native_models': -1,
+                   '_disable_preprocessor_api': False,
+                   '_disable_action_flattening': False}
         ).learners(
             num_gpus_per_learner=0.8 if args.num_gpus > 0 else 0,
             num_learners=1,
@@ -974,7 +1004,10 @@ if __name__ == "__main__":
             env="CustomPlaygroundCrossingEnv-v0",
             env_config={
                 "enable_dowham_reward_v2": False,
-                "env_type": env_type
+                "env_type": env_type,
+                "tile_size": 12,
+                "max_steps": args.max_steps,
+                "size": 19,
             },
             disable_env_checking=True,
             is_atari=False,
@@ -984,15 +1017,12 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.25,
+            num_cpus_per_env_runner=0.5,
             num_gpus_per_env_runner=0,
             batch_mode="complete_episodes",
             rollout_fragment_length="auto",
         )
-        .framework("torch").resources(
-            num_gpus=args.num_gpus,
-            placement_strategy="SPREAD"
-        )
+        .framework("torch")
         .debugging(
             fake_sampler=False,
         ).api_stack(
