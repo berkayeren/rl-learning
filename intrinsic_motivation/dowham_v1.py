@@ -72,6 +72,4 @@ class DoWhaMIntrinsicRewardV1:
         """
         Reset all episodic counts for a new episode.
         """
-        self.usage_counts.clear()
-        self.effectiveness_counts.clear()
         self.state_visit_counts.clear()

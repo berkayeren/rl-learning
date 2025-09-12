@@ -793,7 +793,6 @@ class CustomEnv(EmptyEnv):
         return {**obs}
 
     def reset(self, **kwargs):
-        plot_heatmap(self)
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)
@@ -924,16 +923,22 @@ if __name__ == "__main__":
             kl_coeff=0.2,
             kl_target=0.01,
             vf_loss_coeff=0.5,
-            entropy_coeff=0.001,
+            entropy_coeff=0.006,
+            train_batch_size_per_learner=16384,
+            minibatch_size=2048,
+            entropy_coeff_schedule=[
+                [0, 0.006],
+                [5e5, 0.002],
+                [1.2e6, 0.0],
+            ],
             clip_param=0.3,
             vf_clip_param=10.0,
-            entropy_coeff_schedule=None,
             lr_schedule=None,
-            lr=1e-3,
+            lr=2.5e-4,
             lambda_=0.95,
             gamma=0.99,
-            num_epochs=10,
-            model={'fcnet_hiddens': [1024, 1024],
+            num_epochs=6,
+            model={'fcnet_hiddens': [512, 512],
                    'fcnet_activation': 'tanh',
                    'fcnet_weights_initializer': None,
                    'fcnet_weights_initializer_config': None,
@@ -948,7 +953,7 @@ if __name__ == "__main__":
                    'conv_transpose_kernel_initializer_config': None,
                    'conv_transpose_bias_initializer': None,
                    'conv_transpose_bias_initializer_config': None,
-                   'post_fcnet_hiddens': [1024],
+                   'post_fcnet_hiddens': [512],
                    'post_fcnet_activation': 'relu',
                    'post_fcnet_weights_initializer': None,
                    'post_fcnet_weights_initializer_config': None,
@@ -959,10 +964,10 @@ if __name__ == "__main__":
                    'no_final_linear': False,
                    'vf_share_layers': False,
                    'use_lstm': True,
-                   'max_seq_len': 20,
-                   'lstm_cell_size': 1024,
-                   'lstm_use_prev_action': False,
-                   'lstm_use_prev_reward': False,
+                   'max_seq_len': 64,
+                   'lstm_cell_size': 256,
+                   'lstm_use_prev_action': True,
+                   'lstm_use_prev_reward': True,
                    'lstm_weights_initializer': None,
                    'lstm_weights_initializer_config': None,
                    'lstm_bias_initializer': None,
@@ -979,7 +984,7 @@ if __name__ == "__main__":
                    'attention_init_gru_gate_bias': 2.0,
                    'attention_use_n_prev_actions': 0,
                    'attention_use_n_prev_rewards': 0,
-                   'framestack': True,
+                   'framestack': False,
                    'dim': 88,
                    'grayscale': False,
                    'zero_mean': True,
@@ -989,10 +994,9 @@ if __name__ == "__main__":
                    'custom_preprocessor': None,
                    'encoder_latent_dim': None,
                    'always_check_shapes': False,
-                   'lstm_use_prev_action_reward': -1,
-                   '_use_default_native_models': -1,
                    '_disable_preprocessor_api': False,
                    '_disable_action_flattening': False}
+
         ).learners(
             num_gpus_per_learner=0.8 if args.num_gpus > 0 else 0,
             num_learners=1,
@@ -1019,8 +1023,8 @@ if __name__ == "__main__":
             num_envs_per_env_runner=args.num_envs_per_worker,
             num_cpus_per_env_runner=0.5,
             num_gpus_per_env_runner=0,
-            batch_mode="complete_episodes",
-            rollout_fragment_length="auto",
+            batch_mode="truncate_episodes",
+            rollout_fragment_length=64,
         )
         .framework("torch")
         .debugging(
@@ -1030,7 +1034,7 @@ if __name__ == "__main__":
             enable_env_runner_and_connector_v2=False,
         ).callbacks(CustomCallback)
         .evaluation(
-            evaluation_interval=0,
+            evaluation_interval=3,
             evaluation_duration=10,
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,

@@ -144,10 +144,6 @@ if __name__ == "__main__":
                    'fcnet_weights_initializer_config': None,
                    'fcnet_bias_initializer': None,
                    'fcnet_bias_initializer_config': None,
-                   # "conv_filters": [
-                   #     [16, [3, 3], 5],
-                   #     [32, [4, 4], 1],
-                   # ],
                    'conv_activation': 'relu',
                    'conv_kernel_initializer': None,
                    'conv_kernel_initializer_config': None,

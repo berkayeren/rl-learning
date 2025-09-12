@@ -5,6 +5,8 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Goal
 from minigrid.minigrid_env import MiniGridEnv
 
+import environments.empty
+
 
 class EmptyEnv(MiniGridEnv):
     """
@@ -73,6 +75,7 @@ class EmptyEnv(MiniGridEnv):
             max_steps: int | None = None,
             **kwargs,
     ):
+        print(f"Custom EmptyEnv is used from {environments.empty.__file__} with size {size}")
         self.agent_start_pos = agent_start_pos
         self.agent_start_dir = agent_start_dir
 
