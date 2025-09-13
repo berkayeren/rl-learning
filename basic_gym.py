@@ -6,7 +6,7 @@ import torch
 from gymnasium.wrappers import ResizeObservation
 from minigrid.core.actions import Actions
 from minigrid.manual_control import ManualControl
-from minigrid.wrappers import FullyObsWrapper, ImgObsWrapper, RGBImgObsWrapper
+from minigrid.wrappers import FullyObsWrapper, ImgObsWrapper, RGBImgObsWrapper, RGBImgPartialObsWrapper
 from ray.rllib.algorithms import PPOConfig, PPO
 from ray.tune import register_env
 
@@ -18,23 +18,30 @@ if __name__ == "__main__":
     ray.init(ignore_reinit_error=True, configure_logging=False)
     faulthandler.disable()
 
-    env = CustomEnv(size=19, render_mode="human", highlight=True, env_type=3, enable_dowham_reward_v2=True)
+    env = ImgObsWrapper(RGBImgPartialObsWrapper(
+        CustomEnv(size=19, render_mode="human", highlight=True, env_type=4, enable_dowham_reward_v2=True),
+        tile_size=12))
     # # Register the custom environment
-    # register_env("CustomPlaygroundCrossingEnv-v0",
-    #              lambda config:
-    #              PositionBasedWrapper(
-    #                  CustomEnv(**config)))
+    register_env("CustomPlaygroundCrossingEnv-v0",
+                 lambda config:
 
-    # algo = PPO.from_checkpoint(
-    #     r"/Users/berkayeren/ray_results/PPO_Multiroom_dv2_32_32/DoWhaMV2_multi_room_batch1024[32, 32]5.0_6_env_config=env_type_3_max_steps_1444_conv_filter_False_enable_dowham_reward_v1_False_en_2025-07-14_22-23-26/checkpoint_001495",
-    #     config=PPOConfig().env_runners(
-    #         num_env_runners=1,
-    #         num_envs_per_env_runner=1,
-    #     ).environment(env="CustomPlaygroundCrossingEnv-v0"))
+                 ImgObsWrapper(RGBImgPartialObsWrapper(CustomEnv(**config), tile_size=12)))
 
-    algo = None
-    manual_control = ManualControl(env, seed=42)
-    manual_control.start()
+    algo = PPO.from_checkpoint(
+        r"/Users/berkayeren/ray_results/PPO_TwelveRoom/DoWhaMV2_twelve_rooms_batch4000[512, 512]DowhamTrue_1_env_config=env_type_Environments_twelve_rooms_4_max_steps_1444_conv_filter_F_2025-09-13_13-56-23/checkpoint_000024",
+        config=PPOConfig().env_runners(
+            num_env_runners=1,
+            num_envs_per_env_runner=1,
+        ).environment(env="CustomPlaygroundCrossingEnv-v0").rl_module(
+            model_config_dict={
+                "use_lstm": True,
+                "lstm_cell_size": 256,
+            }
+        ))
+
+    # algo = None
+    # manual_control = ManualControl(env, seed=42)
+    # manual_control.start()
     states = []
     for episode in range(0, 10):
         action = 0
@@ -42,21 +49,16 @@ if __name__ == "__main__":
         terminated = False
         truncated = False
         obs, _ = env.reset()
+        # Initialize LSTM state for the episode
+        lstm_state = algo.get_policy().get_initial_state()
 
         while not (terminated or truncated):
-            # Convert observation to tensor or the appropriate format
-            if isinstance(obs, dict):
-                # If using the PositionBasedWrapper
-                # Convert dict values to tensors if they're numpy arrays
-                obs_processed = {
-                    k: torch.tensor(v) if isinstance(v, np.ndarray) else v
-                    for k, v in obs.items()
-                }
-            else:
-                # If using a different format
-                obs_processed = torch.tensor(obs) if isinstance(obs, np.ndarray) else obs
-
-            action = algo.compute_single_action(observation=obs_processed, prev_action=action, prev_reward=reward)
+            action, lstm_state, _ = algo.compute_single_action(
+                observation=obs,
+                state=lstm_state,
+                prev_action=action,
+                prev_reward=reward
+            )
             obs, reward, terminated, truncated, _ = env.step(action)
             print(f"Action: {Actions(action).name}, Reward: {reward}, Done: {terminated}")
             env.render()
