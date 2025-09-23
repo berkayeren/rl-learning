@@ -287,24 +287,6 @@ if __name__ == "__main__":
     # Extract evaluation metrics
     metrics_data = extract_evaluation_metrics(experiments, args.metric)
 
-    # Optionally write results to SQLite
-    if args.sqlite_db:
-        conn = sqlite3.connect(args.sqlite_db)
-        all_rows = []
-        for exp_name, df in metrics_data.items():
-            # Add metric name as a column
-            df = df.copy()
-            df['metric'] = args.metric
-            df['experiment'] = exp_name
-            # Seed is already in the dataframe from extract_evaluation_metrics
-            all_rows.append(df)
-
-        if all_rows:
-            all_df = pd.concat(all_rows, ignore_index=True)
-            all_df.to_sql('experiment_results', conn, if_exists='replace', index=False)
-        conn.close()
-        print(f"Results written to SQLite database: {args.sqlite_db}")
-
     # 1) Compute per‐experiment CI over time (fills mean, lower_bound, upper_bound)
     metrics_data = calculate_confidence_intervals_over_time(
         metrics_data,
@@ -321,6 +303,13 @@ if __name__ == "__main__":
         num_bootstrap_samples=args.samples,
         confidence_level=args.confidence
     )
+
+    # Optionally write results to SQLite
+    if args.sqlite_db:
+        conn = sqlite3.connect(args.sqlite_db)
+        avg_df.to_sql('experiment_results', conn, if_exists='replace', index=False)
+        conn.close()
+        print(f"Results written to SQLite database: {args.sqlite_db}")
 
     # 3) Plot single mean curve + its bootstrap CI
     fig, ax = plt.subplots(figsize=(12, 8))

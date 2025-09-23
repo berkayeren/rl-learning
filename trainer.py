@@ -24,7 +24,7 @@ BASE_OFFSETS = np.array([
     for i in range(VIEW_SIZE)
 ])
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Goal, Lava, Wall, Door
+from minigrid.core.world_object import Goal, Lava, Wall, Door, Key
 from minigrid.envs import MultiRoom
 from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper, RGBImgPartialObsWrapper, ImgObsWrapper
 from ray import tune, train
@@ -884,13 +884,28 @@ class CustomEnv(EmptyEnv):
                 # This is needed because Python's set is not deterministic
                 doorColor = self._rand_elem(sorted(doorColors))
 
-                entryDoor = Door(doorColor)
+                entryDoor = Door(doorColor, is_locked=True)
                 self.grid.set(room.entryDoorPos[0], room.entryDoorPos[1], entryDoor)
                 prevDoorColor = doorColor
 
                 prevRoom = roomList[idx - 1]
                 prevRoom.exitDoorPos = room.entryDoorPos
 
+        for idx, room in enumerate(roomList):
+            topX, topY = room.top
+            sizeX, sizeY = room.size
+            while True:
+                try:
+                    key_pos = (np.random.choice(range(topX, topX + sizeX)),
+                               np.random.choice(range(topY, topY + sizeY)))
+                    obj = self.grid.get(key_pos[0], key_pos[1])
+                    if self.agent_pos != key_pos and obj is None:  # Ensure it's not the starting position
+                        x, y = room.exitDoorPos
+                        door = self.grid.get(x, y)
+                        self.put_obj(Key(color=door.color), key_pos[0], key_pos[1])
+                        break
+                except (ValueError, TypeError):
+                    break
         # Randomize the starting agent position and direction
         self.place_agent(roomList[0].top, roomList[0].size)
 
@@ -939,6 +954,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
     parser.add_argument('--num_gpus', type=int, help='The number of GPUs to use', default=0)
     parser.add_argument('--num_samples', type=int, help='Number of samples', default=1)
+    parser.add_argument('--verbose', type=int, help='Verbose log level', default=1)
     parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
     parser.add_argument('--max_steps', type=int, help='Max Time Steps', default=200)
     parser.add_argument('--conv_filter', action="store_true", help='Use convolutional layer or flat observation')
@@ -1010,8 +1026,8 @@ if __name__ == "__main__":
             minibatch_size=2048,
             entropy_coeff_schedule=[
                 [0, 0.006],
-                [5e5, 0.002],
-                [1.2e6, 0.0],
+                [args.timesteps_total // 2, 0.002],
+                [args.timesteps_total, 0.0],
             ],
             clip_param=0.3,
             vf_clip_param=10.0,
@@ -1103,7 +1119,7 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.5,
+            num_cpus_per_env_runner=0.25,
             num_gpus_per_env_runner=0,
             batch_mode="truncate_episodes",
             rollout_fragment_length=64,
@@ -1166,7 +1182,7 @@ if __name__ == "__main__":
             },
             checkpoint_config=checkpoint_config,
             trial_name_creator=custom_trial_name,  # Custom trial name
-            verbose=3,  # Display detailed logs
+            verbose=args.verbose,  # Display detailed logs
             num_samples=1,
             log_to_file=True,
             resume=True,
