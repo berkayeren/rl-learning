@@ -70,7 +70,7 @@ number of rollout workers, number of environments per worker, and number of GPUs
 Here is an example of how to run the script:
 
 ```bash
-python custom_train.py --render_mode human --num_envs_per_worker 1 --num_rollout_workers 1 --num_gpus 0
+/Users/berkayeren/PycharmProjects/rl-learning/ray242/.venv/bin/python /Users/berkayeren/PycharmProjects/rl-learning/trainer.py --run_mode experiment --num_rollout_workers 4 --num_envs_per_worker 8 --num_gpus 0 --environment four_rooms --num_samples 4 --max_steps 1444 --timesteps_total 5000000 --trail_name PPO_4Room_dv2_search_5m_maxstep --obs_type flat --enable_dowham_reward_v2
 ```
 
 In this example, the render mode is set to "human", the number of environments per worker is set to 1, the number of

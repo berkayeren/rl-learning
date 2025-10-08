@@ -1,8 +1,9 @@
-import pandas as pd
-import numpy as np
 import argparse
 import sys
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 
 def summarize_data(df):
@@ -23,7 +24,7 @@ def clean_and_process_data(df):
     # Convert appropriate columns to numeric
     numeric_columns = [
         "episode_reward_max", "episode_reward_min", "episode_reward_mean",
-        "episode_len_mean", "training_iteration"
+        "episode_len_mean", "training_iteration", "episode_len_mean"
     ]
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -38,8 +39,9 @@ def analyze_and_plot(df):
     """Analyze the processed data and plot key metrics."""
     # Ensure the relevant columns are numeric
     columns_to_plot = [
-        "episode_reward_max", "episode_reward_min",
-        "episode_reward_mean",
+        # "episode_reward_max", "episode_reward_min",
+        # "episode_reward_mean"
+        'episode_len_mean'
     ]
     for col in columns_to_plot:
         df[col] = pd.to_numeric(df[col], errors='coerce')

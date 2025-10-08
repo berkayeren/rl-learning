@@ -1,0 +1,119 @@
+base_config:
+  # Anything here is shared across *all* variations,
+  # unless it's overridden below.
+  env_config:
+    enable_dowham_reward_v1: false
+    enable_dowham_reward_v2: false
+    enable_count_based: false
+    enable_rnd: false
+  train_batch_size: 256
+  rollout_fragment_length: 256
+
+variations:
+  # -----------------------------------------------------
+  # DoWhaM v1 (enable_dowham_reward_v1 = true)
+  # -----------------------------------------------------
+  # - name: DoWhaM_v1_batch32
+  #   env_config:
+  #     enable_dowham_reward_v1: true
+  #     enable_dowham_reward_v2: false
+  #   model:
+  #     fcnet_hiddens: [ 256, 128 ]
+  #   train_batch_size: 32
+  #   rollout_fragment_length: 32
+
+  # -----------------------------------------------------
+  # DoWhaM v2 (enable_dowham_reward_v2 = true)
+  # -----------------------------------------------------
+  - name: combination_relu_relu
+    env_config:
+      enable_dowham_reward_v1: false
+      enable_dowham_reward_v2: true
+      max_steps: 200
+      transition_divisor: 10
+      terminate_bonus: 10
+    model:
+      custom_model_config:
+        custom_activation: relu
+        activation_fn_value_name: relu
+      use_lstm: False
+      lstm_cell_size: 512
+      lstm_use_prev_action: False
+      lstm_use_prev_reward: False
+    train_batch_size: 32
+    rollout_fragment_length: 32
+    grad_clip: 40.0
+    entropy_coeff: 0.0005
+    vf_loss_coeff: 0.5
+
+
+  # - name: combination_relu_relu
+  #   env_config:
+  #     enable_dowham_reward_v1: false
+  #     enable_dowham_reward_v2: true
+  #     max_steps: 484
+  #     transition_divisor: 1
+  #     terminate_bonus: 10
+  #   # model:
+  #   #   custom_model_config:
+  #   #     custom_activation: leaky_relu
+  #   #     activation_fn_value_name: leaky_relu
+  #   lr: 0.001
+  #   train_batch_size: 128
+  #   grad_clip: 40.0
+  #   entropy_coeff: 0.001
+
+  # - name: combination_relu_relu
+  #   env_config:
+  #     enable_dowham_reward_v1: false
+  #     enable_dowham_reward_v2: false
+  #     max_steps: 30
+  #     transition_divisor: 3
+  #     terminate_bonus: 10
+  #   model:
+  #     custom_model_config:
+  #       custom_activation: elu
+  #       #custom_activation: elu
+  #       activation_fn_value_name: relu
+  #       #activation_fn_value_name: tanh
+  #   lr: 0.001
+  #   train_batch_size: 256
+  #  # -----------------------------------------------------
+  #  # RND
+  #  # -----------------------------------------------------
+  #  - name: RND
+  #    env_config:
+  #      enable_rnd: true
+  #      enable_count_based: false
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: false
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #
+  #  # -----------------------------------------------------
+  #  # CountBased
+  #  # -----------------------------------------------------
+  #  - name: CountBased
+  #    env_config:
+  #      enable_count_based: true
+  #      enable_rnd: false
+  #      enable_dowham_reward_v1: false
+  #      enable_dowham_reward_v2: false
+  #    train_batch_size: 32
+  #    rollout_fragment_length: 32
+  #
+  # -----------------------------------------------------
+  # Default (no intrinsic rewards)
+  # -----------------------------------------------------
+#  - name: Default
+#    env_config:
+#      enable_dowham_reward_v1: false
+#      enable_dowham_reward_v2: false
+#      enable_count_based: false
+#      enable_rnd: false
+#    train_batch_size: 128
+#    rollout_fragment_length: 64
+#    batch_mode: complete_episodes
+#    exploration_config:
+#      epsilon_schedule:
+#        endpoints: [ (0, 1), (100000, 0.5), (500000, 0.1 ) ]

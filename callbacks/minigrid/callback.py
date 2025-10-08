@@ -65,7 +65,6 @@ class MinigridCallback(DefaultCallbacks):
         episode.custom_metrics["toggle"] = env.action_count[5]
         episode.custom_metrics["done"] = env.action_count[6]
         episode.custom_metrics["success_rate"] = env.success_rate
-        episode.custom_metrics["success_history_len"] = len(env.success_history)
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)
@@ -75,13 +74,4 @@ class MinigridCallback(DefaultCallbacks):
 
         # Log the percentage
         episode.custom_metrics["percentage_visited"] = percentage_visited
-
-        # print(
-        #     f"Reward:{episode.total_reward} | env.success_rate:{env.success_rate} | Len:{len(env.success_history)} | env.minNumRooms:{env.minNumRooms}")
-
-    # def on_learn_on_batch(
-    #        self, *, policy: Policy, train_batch: SampleBatch, result: dict, **kwargs
-    # ) -> None:
-    #    seq_lens = train_batch.get("seq_lens", 16)
-    #    train_batch['seq_lens'] = np.full_like(seq_lens, 16)
-    #    super().on_learn_on_batch(policy=policy, train_batch=train_batch, result=result, **kwargs)
+        episode.custom_metrics["total_episode_reward"] = env.total_episode_reward

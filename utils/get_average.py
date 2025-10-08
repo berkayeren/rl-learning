@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     plt.imshow(visited_states_array, cmap='hot', interpolation='nearest')
     plt.colorbar()
-    plt.scatter(14, 7, c='green', marker='*', s=200)
+    plt.scatter(14, 7, c='green', marker='*', s=800)
 
     plt.title(f'Heatmap of Visited States in Trial {i + 1}')
 

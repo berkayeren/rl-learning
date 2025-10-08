@@ -223,3 +223,420 @@ class NatureCNN(TorchModelV2, nn.Module):
 
     def value_function(self):
         return self.value_head(self._features).squeeze(1)
+
+
+class CustomMiniGridLSTM(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # Determine device
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("Using CUDA device")
+        # elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        #     self.device = torch.device("mps")
+        #     print("Using MPS device")
+        else:
+            self.device = torch.device("cpu")
+            print("Using CPU device")
+
+        # Get activation function from model_config
+        activation_fn_name = model_config['custom_model_config'].get("custom_activation", "relu").lower()
+        self.activation_fn = self._get_activation_function(activation_fn_name)
+        # Core dimensions
+        self.obs_size = int(np.prod(obs_space.shape))
+        hidden_size = 256  # Reduced size for flattened input
+
+        # Feature extraction layers
+        self.network = nn.Sequential(
+            nn.Linear(self.obs_size, hidden_size),
+            self.activation_fn(),
+            nn.Linear(hidden_size, hidden_size),
+            self.activation_fn(),
+            nn.Linear(hidden_size, self.obs_size),
+            self.activation_fn(),
+        ).to(self.device)
+
+        # Value branch
+        self.value_branch = nn.Sequential(
+            nn.Linear(self.obs_size, hidden_size),
+            self.activation_fn(),
+            nn.Linear(hidden_size, 1)
+        ).to(self.device)
+
+        self._initialize_weights()
+
+        self._features = None
+        self._cur_value = None
+
+    def _initialize_weights(self):
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                nn.init.orthogonal_(param, gain=np.sqrt(2))
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+
+    def _get_activation_function(self, name):
+        """
+        Return the corresponding activation function class based on its name.
+        """
+        activation_map = {
+            "relu": nn.ReLU,
+            "leaky_relu": nn.LeakyReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "softplus": nn.Softplus
+        }
+        return activation_map.get(name, nn.ReLU)
+
+    @override(TorchModelV2)
+    def forward(self, input_dict, state, seq_lens):
+        # Move input to appropriate device
+        x = input_dict["obs"].float().to(self.device)
+
+        # Forward pass
+        self._features = self.network(x)
+        self._cur_value = self.value_branch(self._features).squeeze(1)
+
+        # Move output back to CPU if needed for RLlib
+        if self.device != torch.device("cpu"):
+            self._features = self._features.cpu()
+            self._cur_value = self._cur_value.cpu()
+
+        return self._features, state
+
+    @override(TorchModelV2)
+    def value_function(self):
+        assert self._cur_value is not None, "must call forward() first"
+        return self._cur_value
+
+    def to_device(self, device):
+        """Helper method to move model to a different device"""
+        self.device = device
+        self.network = self.network.to(device)
+        self.value_branch = self.value_branch.to(device)
+        return self
+
+
+class SimpleGridModel(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # Determine device
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("Using CUDA device")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device("cpu")
+            print("Using MPS device")
+        else:
+            self.device = torch.device("cpu")
+            print("Using CPU device")
+
+        self.obs_size = obs_space.shape[0]
+
+        # Get activation function from model_config
+        activation_fn_name = model_config['custom_model_config'].get("custom_activation", "relu").lower()
+        activation_fn_value_name = model_config['custom_model_config'].get("activation_fn_value_name", "relu").lower()
+        self.activation_fn = self._get_activation_function(activation_fn_name)
+        self.activation_fn_value = self._get_activation_function(activation_fn_value_name)
+        print(
+            f"Using activation function: {activation_fn_name},Using value activation function: {activation_fn_value_name}")
+
+        # Feature extraction layers
+        self.network = nn.Sequential(
+            nn.Linear(self.obs_size, 256),  # Input layer
+            nn.LayerNorm(256),  # Normalization
+            self.activation_fn(),
+            nn.Dropout(0.2),  # Dropout for regularization
+
+            nn.Linear(256, 128),  # Hidden layer 1
+            nn.LayerNorm(128),  # Normalization
+            self.activation_fn(),
+            nn.Dropout(0.2),  # Dropout for regularization
+
+            nn.Linear(128, 64),  # Hidden layer 2
+            nn.LayerNorm(64),  # Normalization
+            self.activation_fn(),
+        ).to(self.device)
+
+        # Output layer for action logits
+        self.fc_out = nn.Linear(128, num_outputs).to(self.device)
+
+        # Value branch
+        self.value_branch = nn.Sequential(
+            nn.Linear(64, 64),  # Intermediate layer
+            nn.LayerNorm(64),  # Normalization
+            self.activation_fn_value(),
+            nn.Dropout(0.2),  # Dropout for regularization
+
+            nn.Linear(64, 32),  # Intermediate layer
+            nn.LayerNorm(32),  # Normalization
+            self.activation_fn_value(),
+
+            nn.Linear(32, 1)  # Single output for the value function
+        ).to(self.device)
+
+    def _get_activation_function(self, name):
+        """
+        Return the corresponding activation function class based on its name.
+        """
+        activation_map = {
+            "relu": nn.ReLU,
+            "elu": nn.ELU,
+            "leaky_relu": nn.LeakyReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "softplus": nn.Softplus
+        }
+        return activation_map.get(name, nn.ReLU)
+
+    def forward(self, input_dict, state, seq_lens):
+        # Extract components from the OrderedDict
+        direction = input_dict["obs"]["direction"].float().to(self.device)  # Process direction
+        image = input_dict["obs"]["image"].float().to(self.device)  # Process image
+        position = input_dict["obs"]["position"].float().to(self.device)  # Process position
+
+        # Combine processed components
+        combined_features = torch.cat([direction, image, position], dim=-1)
+
+        # Pass through the network
+        x = self.network(combined_features).to(self.device)
+        logits = self.fc_out(x).to(self.device)
+
+        # Save features for value computation
+        self._features = x
+        return logits, state
+
+    def value_function(self):
+        return self.value_branch(self._features).squeeze(-1)
+
+
+class WallAwareGridModel(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # Device setup
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Activation functions
+        activation_fn = model_config['custom_model_config'].get("custom_activation", "relu")
+        self.activation = self._get_activation(activation_fn)
+
+        # ========== Enhanced Feature Extraction ==========
+        # Branch 1: Process image (flattened grid observation)
+        self.image_net = nn.Sequential(
+            nn.Linear(obs_space['image'].shape[0], 256),
+            nn.LayerNorm(256),
+            self.activation(),
+            nn.Dropout(0.2)
+        )
+
+        # Branch 2: Process position & direction (critical for wall detection)
+        self.pos_dir_net = nn.Sequential(
+            nn.Linear(3, 64),  # (x, y, direction)
+            nn.LayerNorm(64),
+            self.activation(),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
+            self.activation()
+        )
+
+        # Merge branches
+        self.merge_net = nn.Sequential(
+            nn.Linear(256 + 64, 128),
+            nn.LayerNorm(128),
+            self.activation(),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
+            self.activation()
+        )
+
+        # Output layers
+        self.action_head = nn.Linear(64, num_outputs)
+        self.value_head = nn.Sequential(
+            nn.Linear(64, 32),
+            self.activation(),
+            nn.Linear(32, 1)
+        )
+
+    def _get_activation(self, name):
+        activation_map = {
+            "relu": nn.ReLU,
+            "elu": nn.ELU,
+            "leaky_relu": nn.LeakyReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "softplus": nn.Softplus
+        }
+        return activation_map.get(name, nn.ReLU)
+
+    def forward(self, input_dict, state, seq_lens):
+        # Extract observations
+        obs = input_dict["obs"]
+        image = obs["image"].float().to(self.device)
+        position = obs["position"].float().to(self.device)
+        direction = obs["direction"].float().to(self.device)
+
+        # Branch 1: Image features
+        img_features = self.image_net(image)
+
+        # Branch 2: Position-Direction features
+        pos_dir = torch.cat([position, direction.unsqueeze(-1)], dim=-1)
+        pos_dir_features = self.pos_dir_net(pos_dir)
+
+        # Merge features
+        merged = torch.cat([img_features, pos_dir_features], dim=-1)
+        x = self.merge_net(merged)
+
+        # Save for value function
+        self._features = x
+
+        return self.action_head(x), state
+
+    def value_function(self):
+        return self.value_head(self._features).squeeze(-1)
+
+
+class SpatialAwareGridModel(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        outputs = num_outputs if num_outputs is not None else 7
+        TorchModelV2.__init__(self, obs_space, action_space, outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # Device setup
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Activation function
+        activation_fn = model_config['custom_model_config'].get("custom_activation", "relu")
+        print(f"Using activation function: {activation_fn}")
+        self.activation = self._get_activation(activation_fn)
+
+        try:
+            self.image_shape = obs_space["image"].shape  # (H, W, C)
+        except TypeError:
+            self.image_shape = obs_space  # (H, W, C)
+
+        # ========== Convolutional Layers ==========
+        self.conv_net = nn.Sequential(
+            # Input shape: (C, H, W)
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ELU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ELU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ELU(),
+            nn.Flatten()
+        )
+
+        # Calculate conv output size dynamically
+        with torch.no_grad():
+            dummy_input = torch.randn(1, 3, *self.image_shape[:2])
+            conv_out_size = self.conv_net(dummy_input).shape[-1]
+
+        # ========== Position-Direction Processing ==========
+        self.pos_dir_net = nn.Sequential(
+            nn.Linear(3, 64),  # (x, y, direction)
+            nn.LeakyReLU(),
+            nn.Linear(64, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 64),
+        )
+
+        # ========== Merged Network ==========
+        self.merge_net = nn.Sequential(
+            nn.Linear(conv_out_size + 64, 1024),
+            nn.LayerNorm(1024),
+            nn.LeakyReLU(),
+            nn.Linear(1024, 1024)
+        )
+
+        # Output layers
+        self.action_head = nn.Sequential(
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, outputs),
+        )
+
+        self.value_head = nn.Sequential(
+            nn.Linear(1024, 1024),
+            nn.Tanh(),  # Non-linearity before final output
+            nn.Linear(1024, 1),
+        )
+
+    def _get_activation(self, name):
+        activations = {
+            "relu": nn.ReLU,
+            "tanh": nn.Tanh,
+            "leaky_relu": nn.LeakyReLU
+        }
+        return activations.get(name.lower(), nn.ReLU)
+
+    def forward(self, input_dict, state, seq_lens):
+        obs = input_dict["obs"]
+
+        # Process image
+        image = obs["image"].float().to(self.device)
+
+        # Ensure 4D tensor: [Batch, Channels, Height, Width]
+        if image.dim() == 3:  # Single observation (add batch dim)
+            image = image.unsqueeze(0)
+        image = image.permute(0, 3, 1, 2)  # [B, H, W, C] → [B, C, H, W]
+
+        img_features = self.conv_net(image)
+
+        position = obs["position"]  # shape can vary at runtime!
+        # Convert to float to avoid dtype issues
+        position = position.float().to(self.device)
+
+        if position.dim() == 2 and position.shape[1] == 2:
+            # Shape: [B, 2] => the usual case: batch of (x, y)
+            x = position[:, 0]
+            y = position[:, 1]
+
+        elif position.dim() == 1 and position.shape[0] == 2:
+            # Shape: [2] => a single (x, y) without a batch dimension
+            # We'll treat this as batch_size=1
+            x = position[0].unsqueeze(0)
+            y = position[1].unsqueeze(0)
+
+        elif position.dim() == 1:
+            # Shape: [B], or [1], or something meaning “there’s only one number”
+            # You can decide how to handle it. If you want to treat it as x-only, then set y=0:
+            x = position
+            y = torch.zeros_like(position, device=self.device)
+
+        else:
+            # If you ever get here, the shape is something unexpected.
+            raise ValueError(f"Unexpected shape for obs['position']: {position.shape}")
+
+        x = x.unsqueeze(-1)
+        y = y.unsqueeze(-1)
+
+        direction = obs["direction"].float().to(self.device)
+
+        # If shape is [B], unsqueeze to [B,1]
+        if direction.dim() == 1:
+            direction = direction.unsqueeze(-1)
+
+        pos_dir = torch.cat([x, y, direction], dim=1).to(self.device)
+
+        pos_dir_features = self.pos_dir_net(pos_dir)
+
+        # Merge features
+        merged = torch.cat([img_features, pos_dir_features], dim=1)
+        x = self.merge_net(merged)
+        self._features = x
+
+        return self.action_head(x), state
+
+    @override(TorchModelV2)
+    def value_function(self):
+        assert self.value_head is not None, "must call forward() first"
+        return self.value_head(self._features).squeeze(-1)
