@@ -822,8 +822,8 @@ class CustomEnv(EmptyEnv):
         return obs, {}
 
     def twelve_rooms(self, width, height):
-        self.minNumRooms = 12
-        self.maxNumRooms = 12
+        self.minNumRooms = 6
+        self.maxNumRooms = 6
         self.maxRoomSize = 6
 
         roomList = []
@@ -976,6 +976,8 @@ if __name__ == "__main__":
     parser.add_argument('--enable_rnd', action='store_true', help='Enable RND exploration')
     args = parser.parse_args()
 
+    print(f"\n Parsed arguments: {args} \n")
+
     ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True,
              num_cpus=10, runtime_env={
             "env_vars": {
@@ -1119,7 +1121,7 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=0.25,
+            num_cpus_per_env_runner=1,
             num_gpus_per_env_runner=0,
             batch_mode="truncate_episodes",
             rollout_fragment_length=64,
