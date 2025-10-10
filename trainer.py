@@ -957,6 +957,7 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', type=int, help='Verbose log level', default=1)
     parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
     parser.add_argument('--max_steps', type=int, help='Max Time Steps', default=200)
+    parser.add_argument('--num_cpus_per_env_runner', type=int, help='num_cpus_per_env_runner', default=0.25)
     parser.add_argument('--conv_filter', action="store_true", help='Use convolutional layer or flat observation')
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
@@ -1121,7 +1122,7 @@ if __name__ == "__main__":
         .env_runners(
             num_env_runners=args.num_rollout_workers,
             num_envs_per_env_runner=args.num_envs_per_worker,
-            num_cpus_per_env_runner=1,
+            num_cpus_per_env_runner=args.num_cpus_per_env_runner,
             num_gpus_per_env_runner=0,
             batch_mode="truncate_episodes",
             rollout_fragment_length=64,
