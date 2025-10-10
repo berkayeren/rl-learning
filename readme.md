@@ -25,7 +25,7 @@ git clone https://github.com/berkayeren/rl-learning.git
 Navigate to the project directory.
 
 ```bash
-cd /rl-learning
+cd rl-learning
 ```
 
 Create a virtual environment.
@@ -42,7 +42,7 @@ On Windows:
 .\env\Scripts\activate
 ```
 
-On Unix or MacOS:
+On Unix or macOS:
 
 ```bash
 source env/bin/activate
@@ -64,17 +64,18 @@ pip install -r requirements-cuda121.txt
 
 ![img.png](img.png)
 
-You can train the agent using the `custom_train.py` script. The script takes command line arguments for the render mode,
-number of rollout workers, number of environments per worker, and number of GPUs to use.
+You can train the agent using the `trainer.py` script. The script takes command line arguments such as the number of
+rollout workers, number of environments per worker, number of GPUs, environment, observation type, and reward options.
 
-Here is an example of how to run the script:
+Here is an example of how to run the script from the project root with your virtual environment activated:
 
 ```bash
-/Users/berkayeren/PycharmProjects/rl-learning/ray242/.venv/bin/python /Users/berkayeren/PycharmProjects/rl-learning/trainer.py --run_mode experiment --num_rollout_workers 4 --num_envs_per_worker 8 --num_gpus 0 --environment four_rooms --num_samples 4 --max_steps 1444 --timesteps_total 5000000 --trail_name PPO_4Room_dv2_search_5m_maxstep --obs_type flat --enable_dowham_reward_v2
+python trainer.py --run_mode experiment --num_rollout_workers 4 --num_envs_per_worker 16 --num_gpus 0 --environment twelve_rooms --num_samples 1 --max_steps 1444 --timesteps_total 2500000 --trail_name PPO_TwelveRoom --enable_dowham_reward_v2 --obs_type conv
 ```
 
-In this example, the render mode is set to "human", the number of environments per worker is set to 1, the number of
-rollout workers is set to 1, and the number of GPUs is set to 0.
+This example trains on the `twelve_rooms` environment with 4 rollout workers and 16 environments per worker (64 total),
+uses CPU only (`--num_gpus 0`), runs for 2.5M timesteps with a max of 1444 steps per episode, uses convolutional
+observations (`--obs_type conv`), and enables the DoWham reward v2 (`--enable_dowham_reward_v2`).
 
 ## Built With
 
