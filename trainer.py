@@ -977,6 +977,8 @@ if __name__ == "__main__":
     parser.add_argument('--enable_rnd', action='store_true', help='Enable RND exploration')
     args = parser.parse_args()
 
+    print(f"\n Parsed arguments: {args} \n")
+
     ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True,
              num_cpus=10, runtime_env={
             "env_vars": {
