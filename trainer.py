@@ -822,9 +822,9 @@ class CustomEnv(EmptyEnv):
         return obs, {}
 
     def twelve_rooms(self, width, height):
-        self.minNumRooms = 6
-        self.maxNumRooms = 6
-        self.maxRoomSize = 6
+        self.minNumRooms = 4
+        self.maxNumRooms = 4
+        self.maxRoomSize = 12
 
         roomList = []
 
@@ -957,8 +957,9 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', type=int, help='Verbose log level', default=1)
     parser.add_argument('--timesteps_total', type=int, help='Timesteps Total', default=100_000_000)
     parser.add_argument('--max_steps', type=int, help='Max Time Steps', default=200)
-    parser.add_argument('--num_cpus_per_env_runner', type=int, help='num_cpus_per_env_runner', default=0.25)
+    parser.add_argument('--num_cpus_per_env_runner', type=float, help='num_cpus_per_env_runner', default=0.25)
     parser.add_argument('--conv_filter', action="store_true", help='Use convolutional layer or flat observation')
+    parser.add_argument('--evaluation_interval', type=int, default=3, help='Evaluation interval')
     parser.add_argument('--environment', type=str, help='Environment to choose', choices=[
         "empty",
         "crossing",
@@ -980,12 +981,12 @@ if __name__ == "__main__":
     print(f"\n Parsed arguments: {args} \n")
 
     ray.init(ignore_reinit_error=True, num_gpus=args.num_gpus, include_dashboard=False, log_to_driver=True,
-             num_cpus=10, runtime_env={
-            "env_vars": {
-                "RAY_DISABLE_WORKER_STARTUP_LOGS": "0",
-                "RAY_LOG_TO_STDERR": "0",
-            }
-        })
+             runtime_env={
+                 "env_vars": {
+                     "RAY_DISABLE_WORKER_STARTUP_LOGS": "0",
+                     "RAY_LOG_TO_STDERR": "0",
+                 }
+             })
 
     env_type = CustomEnv.Environments[args.environment]
 
@@ -1135,7 +1136,7 @@ if __name__ == "__main__":
             enable_env_runner_and_connector_v2=False,
         ).callbacks(CustomCallback)
         .evaluation(
-            evaluation_interval=3,
+            evaluation_interval=args.evaluation_interval,
             evaluation_duration=10,
             evaluation_duration_unit="episodes",
             evaluation_parallel_to_training=False,
