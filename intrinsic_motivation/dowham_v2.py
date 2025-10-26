@@ -174,32 +174,22 @@ class DoWhaMIntrinsicRewardV2:
 
         # Calculate base action bonus
         action_bonus = self.calculate_bonus(obs, action)
-        state_count = len(self.unseen_positions) ** self.tau
+        state_count = self.state_visit_counts[next_obs] or 1
 
-        if state_count == 0:
-            state_count = 1  # Avoid division by zero
+        total_reward = action_bonus
 
-        base_reward = action_bonus / np.sqrt(state_count)
-        total_reward = 0.0
         # Enhanced reward structure
         if has_newly_seen:
-            # Give substantial bonus for reaching a subgoal (previously unseen position)
-            subgoal_bonus = 10 * action_bonus  # Double the action bonus for subgoal achievement
-            total_reward = base_reward + subgoal_bonus
-        elif was_unseen_position:
-            # Standard reward for discovering new positions
-            total_reward = base_reward
-        # elif self.usage_counts[obs].get(action, 1) > 1:
-        #     # No reward if neither condition is met
-        #     return -0.1
+            expansion_bonus = action_bonus * np.log1p(len(newly_seen))  # log(1 + k)
+            total_reward += 1.0 * expansion_bonus
 
-        return round(total_reward, 5)
+        # 2) Achievement: reward when we step into a previously unseen position
+        if was_unseen_position:
+            total_reward += 1.0 * action_bonus
+
+        return round(total_reward / np.sqrt(state_count), 5)
 
     def reset_episode(self):
         self.state_visit_counts.clear()
-        # self.usage_counts.clear()
         self.unseen_positions.clear()
         self.visited_positions.clear()
-        # self.effectiveness_counts.clear()
-        # self.recent_transitions.clear()
-        # self.action_state.clear()
