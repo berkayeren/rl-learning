@@ -158,7 +158,8 @@ def main():
     for db_path in args.db_paths:
         print(f"Reading database: {db_path}")
         df = read_sqlite_database(db_path)
-        all_experiments.append(df)
+        exp_name = Path(db_path).stem.split('_', 1)[-1]
+        all_experiments.append([df, exp_name])
 
     if not all_experiments:
         print("No experiment data found in any database")
@@ -173,19 +174,18 @@ def main():
     colors = [distinctive_colors[i % len(distinctive_colors)] for i in range(len(all_experiments))]
     fig, ax = plt.subplots(figsize=tuple(args.figsize))
 
-    for i, df in enumerate(all_experiments):
+    for i, [df, name] in enumerate(all_experiments):
         color = colors[i]
         # 3) Plot single mean curve + its bootstrap CI
         iterations = df['iteration']
         m = df['mean']
-        # lb = df['lower_bound']
-        # ub = df['upper_bound']
-        #
-        # ax.fill_between(iterations, lb, ub, color=color, alpha=0.5,
-        #                 label=f'{int(100 * args.confidence)}% CI', zorder=1)
-        # ax.plot(iterations, lb, linestyle='--', color=color, linewidth=2, zorder=2, label='Lower CI')
-        # ax.plot(iterations, ub, linestyle='--', color=color, linewidth=2, zorder=2, label='Upper CI')
-        ax.plot(iterations, m, color=color, linewidth=3, zorder=3, label='Mean')
+        lb = df['lower_bound']
+        ub = df['upper_bound']
+        ax.fill_between(iterations, lb, ub, color=color, alpha=0.5,
+                        label=f'{int(100 * args.confidence)}% CI', zorder=1)
+        ax.plot(iterations, lb, linestyle='--', color=color, linewidth=2, zorder=2, label='Lower CI')
+        ax.plot(iterations, ub, linestyle='--', color=color, linewidth=2, zorder=2, label='Upper CI')
+        ax.plot(iterations, m, color=color, linewidth=3, zorder=3, label=name.lower())
 
     ax.set_xlabel('Training Iterations')
     ax.set_ylabel(args.metric)

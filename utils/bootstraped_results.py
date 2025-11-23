@@ -64,6 +64,7 @@ def extract_evaluation_metrics(experiments, metric_name, iteration_column="train
     for exp_name, df in experiments.items():
         # Check if the nested column exists
         if "evaluation" in df.columns:
+            print("Extracting Evaluation metrics for", exp_name)
             def extract_value(row):
                 eval_obj = row["evaluation"]
                 if isinstance(eval_obj, dict):
