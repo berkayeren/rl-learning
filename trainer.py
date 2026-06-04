@@ -185,7 +185,6 @@ class CustomEnv(EmptyEnv):
         long_corridor = 6
 
     def __init__(self, **kwargs):
-        self.roomList = []
         self.shaped_reward = 0
         self.termination_reward = 0
         self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
@@ -925,8 +924,8 @@ class CustomEnv(EmptyEnv):
 
         # Choose a random number of rooms to generate
         numRooms = self._rand_int(self.minNumRooms, self.maxNumRooms + 1)
-
-        while len(self.roomList) < numRooms:
+        roomList = []
+        while len(roomList) < numRooms:
             curRoomList = []
 
             entryDoorPos = (self._rand_int(0, width - 2), self._rand_int(0, width - 2))
@@ -941,12 +940,12 @@ class CustomEnv(EmptyEnv):
                 entryDoorPos=entryDoorPos,
             )
 
-            if len(curRoomList) > len(self.roomList):
-                self.roomList = curRoomList
+            if len(curRoomList) > len(roomList):
+                roomList = curRoomList
 
         # Store the list of rooms in this environment
-        assert len(self.roomList) > 0
-        self.rooms = self.roomList
+        assert len(roomList) > 0
+        self.rooms = roomList
 
         # Create the grid
         self.grid = Grid(width, height)
@@ -955,7 +954,7 @@ class CustomEnv(EmptyEnv):
         prevDoorColor = None
 
         # For each room
-        for idx, room in enumerate(self.roomList):
+        for idx, room in enumerate(roomList):
             topX, topY = room.top
             sizeX, sizeY = room.size
 
@@ -983,10 +982,10 @@ class CustomEnv(EmptyEnv):
                 self.grid.set(room.entryDoorPos[0], room.entryDoorPos[1], entryDoor)
                 prevDoorColor = doorColor
 
-                prevRoom = self.roomList[idx - 1]
+                prevRoom = roomList[idx - 1]
                 prevRoom.exitDoorPos = room.entryDoorPos
 
-        for idx, room in enumerate(self.roomList):
+        for idx, room in enumerate(roomList):
             topX, topY = room.top
             sizeX, sizeY = room.size
             while True:
@@ -1002,10 +1001,10 @@ class CustomEnv(EmptyEnv):
                 except (ValueError, TypeError):
                     break
         # Randomize the starting agent position and direction
-        self.place_agent(self.roomList[0].top, self.roomList[0].size)
+        self.place_agent(roomList[0].top, roomList[0].size)
 
         # Place the final goal in the last room
-        self.goal_pos = self.place_obj(Goal(), self.roomList[-1].top, self.roomList[-1].size)
+        self.goal_pos = self.place_obj(Goal(), roomList[-1].top, roomList[-1].size)
 
         self.mission = "traverse the rooms to get to the goal"
 
