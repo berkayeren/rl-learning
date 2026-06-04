@@ -12,6 +12,11 @@ from pathlib import Path
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
+from matplotlib import colors as mcolors
+
+LABEL_FONT_SIZE = 20
+TICK_FONT_SIZE = 18
+LEGEND_FONT_SIZE = 18
 
 from utils.bootstraped_results import calculate_confidence_intervals_over_time, extract_evaluation_metrics
 
@@ -76,7 +81,7 @@ def process_experiments_from_db(df, metric_name, bin_size=None, confidence_level
 
 
 def plot_multiple_experiments(experiments_data, metric_name, confidence_level=0.95,
-                              output_path=None, title=None, figsize=(12, 8)):
+                              output_path=None, y_label=None, figsize=(12, 8), color_cycle=None):
     """Plot multiple experiments on the same figure."""
     if not experiments_data:
         print("No experiment data to plot")
@@ -84,7 +89,7 @@ def plot_multiple_experiments(experiments_data, metric_name, confidence_level=0.
 
     # Set up the plot with a nice color palette
     plt.style.use('default')
-    colors = plt.cm.tab10(np.linspace(0, 1, len(experiments_data)))
+    colors = color_cycle or plt.cm.tab10(np.linspace(0, 1, len(experiments_data)))
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -107,15 +112,11 @@ def plot_multiple_experiments(experiments_data, metric_name, confidence_level=0.
         ax.plot(iterations, means, color=color, linewidth=2, label=f'{exp_name} (Mean)')
 
     # Customize the plot
-    ax.set_xlabel('Training Iterations', fontsize=12)
-    ax.set_ylabel(metric_name, fontsize=12)
+    ax.set_xlabel('Training Iterations', fontsize=LABEL_FONT_SIZE)
+    ax.set_ylabel(y_label or metric_name, fontsize=LABEL_FONT_SIZE)
+    ax.tick_params(labelsize=TICK_FONT_SIZE)
 
-    if title:
-        ax.set_title(title, fontsize=14, fontweight='bold')
-    else:
-        ax.set_title(f'{metric_name} Comparison Across Experiments', fontsize=14, fontweight='bold')
-
-    ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
+    ax.legend(loc='best', frameon=True, fancybox=True, shadow=True, fontsize=LEGEND_FONT_SIZE)
     ax.grid(True, linestyle='--', alpha=0.7)
 
     # Improve layout
@@ -143,54 +144,85 @@ def main():
                         help="Bin size for iteration grouping (optional)")
     parser.add_argument("--output",
                         help="Output file path for the plot (optional)")
-    parser.add_argument("--title",
-                        help="Custom title for the plot (optional)")
+    parser.add_argument("--labels", nargs='+',
+                        help="Custom labels for each database path (must match the number of db_paths)")
+    parser.add_argument("--y_label",
+                        help="Custom y-axis label (default: metric)")
+    parser.add_argument("--colors", nargs='+',
+                        help="Custom Matplotlib-compatible colors for each db_path (must match count)")
     parser.add_argument("--figsize", nargs=2, type=int, default=[12, 8],
                         help="Figure size as width height (default: 12 8)")
     parser.add_argument("--ci_method", choices=['bootstrap', 'std_error'], default='bootstrap',
                         help="Method to calculate confidence intervals")
+    parser.add_argument("--max_iterations", type=int,
+                        help="Plot up to this iteration (inclusive); useful to truncate long runs")
 
     args = parser.parse_args()
 
     # Read data from all databases
     all_experiments = []
 
-    for db_path in args.db_paths:
+    if args.labels and len(args.labels) != len(args.db_paths):
+        parser.error("Number of labels must match the number of db_paths")
+
+    plot_labels = args.labels or [Path(path).stem.split('_', 1)[-1] for path in args.db_paths]
+
+    for db_path, label in zip(args.db_paths, plot_labels):
         print(f"Reading database: {db_path}")
         df = read_sqlite_database(db_path)
-        all_experiments.append(df)
+        if args.max_iterations is not None and df is not None:
+            df = df[df['iteration'] <= args.max_iterations]
+        all_experiments.append([df, label])
 
     if not all_experiments:
         print("No experiment data found in any database")
         return
 
-    distinctive_colors = [
-        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
-    ]
+    if args.colors:
+        if len(args.colors) != len(args.db_paths):
+            parser.error("Number of colors must match the number of db_paths")
+        for color in args.colors:
+            if not mcolors.is_color_like(color):
+                parser.error(f"Invalid Matplotlib color specification: {color}")
+        colors = args.colors
+    else:
+        default_palette = [
+            '#1f77b4',
+            '#ff7f0e',
+            '#2ca02c',
+            '#d62728',
+            '#9467bd',
+            '#8c564b',
+            '#e377c2',
+            '#7f7f7f',
+            '#bcbd22',
+            '#17becf',
+            '#aec7e8',
+            '#ffbb78',
+            '#98df8a',
+            '#ff9896',
+            '#c5b0d5'
+        ]
+        colors = [default_palette[i % len(default_palette)] for i in range(len(all_experiments))]
 
-    colors = [distinctive_colors[i % len(distinctive_colors)] for i in range(len(all_experiments))]
     fig, ax = plt.subplots(figsize=tuple(args.figsize))
 
-    for i, df in enumerate(all_experiments):
+    for i, [df, name] in enumerate(all_experiments):
         color = colors[i]
         # 3) Plot single mean curve + its bootstrap CI
         iterations = df['iteration']
         m = df['mean']
-        # lb = df['lower_bound']
-        # ub = df['upper_bound']
-        #
-        # ax.fill_between(iterations, lb, ub, color=color, alpha=0.5,
-        #                 label=f'{int(100 * args.confidence)}% CI', zorder=1)
-        # ax.plot(iterations, lb, linestyle='--', color=color, linewidth=2, zorder=2, label='Lower CI')
-        # ax.plot(iterations, ub, linestyle='--', color=color, linewidth=2, zorder=2, label='Upper CI')
-        ax.plot(iterations, m, color=color, linewidth=3, zorder=3, label='Mean')
+        lb = df['lower_bound']
+        ub = df['upper_bound']
+        ax.fill_between(iterations, lb, ub, color=color, alpha=0.35, zorder=1)
+        # ax.plot(iterations, lb, linestyle='--', color=color, linewidth=2, zorder=2, label=f'{name} Lower CI')
+        # ax.plot(iterations, ub, linestyle='--', color=color, linewidth=2, zorder=2, label=f'{name} Upper CI')
+        ax.plot(iterations, m, color=color, linewidth=2, zorder=3, label=name)
 
-    ax.set_xlabel('Training Iterations')
-    ax.set_ylabel(args.metric)
-    ax.set_title(f'{args.metric} Over Training Iterations (Mean ± {int(100 * args.confidence)}% CI)')
-    ax.legend(loc='best')
+    ax.set_xlabel('Training Iterations', fontsize=LABEL_FONT_SIZE)
+    ax.set_ylabel(args.y_label or args.metric, fontsize=LABEL_FONT_SIZE)
+    ax.tick_params(labelsize=TICK_FONT_SIZE)
+    ax.legend(loc='best', fontsize=LEGEND_FONT_SIZE)
     ax.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.show()
