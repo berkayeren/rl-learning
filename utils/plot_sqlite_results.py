@@ -154,6 +154,8 @@ def main():
                         help="Figure size as width height (default: 12 8)")
     parser.add_argument("--ci_method", choices=['bootstrap', 'std_error'], default='bootstrap',
                         help="Method to calculate confidence intervals")
+    parser.add_argument("--max_iterations", type=int,
+                        help="Plot up to this iteration (inclusive); useful to truncate long runs")
 
     args = parser.parse_args()
 
@@ -168,6 +170,8 @@ def main():
     for db_path, label in zip(args.db_paths, plot_labels):
         print(f"Reading database: {db_path}")
         df = read_sqlite_database(db_path)
+        if args.max_iterations is not None and df is not None:
+            df = df[df['iteration'] <= args.max_iterations]
         all_experiments.append([df, label])
 
     if not all_experiments:

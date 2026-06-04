@@ -24,7 +24,7 @@ BASE_OFFSETS = np.array([
     for i in range(VIEW_SIZE)
 ])
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Goal, Lava, Wall, Door, Key
+from minigrid.core.world_object import Goal, Lava, Wall, Door, Key, Floor
 from minigrid.envs import MultiRoom
 from minigrid.wrappers import RGBImgObsWrapper, FullyObsWrapper, FlatObsWrapper, RGBImgPartialObsWrapper, ImgObsWrapper
 from ray import tune, train
@@ -133,7 +133,7 @@ def plot_heatmap(env, filename="visit_heatmap.png"):
         for y in range(env.height):
             count = env.states[x, y]
             if count > 0:  # Only show counts for visited cells
-                plt.text(x, env.height - y - 1, str(count), ha='center', va='center', color='white', fontsize=8)
+                plt.text(x, env.height - y - 1, "", ha='center', va='center', color='white', fontsize=8)
 
     # Overlay walls in black
     for x in range(env.width):
@@ -143,6 +143,20 @@ def plot_heatmap(env, filename="visit_heatmap.png"):
             if isinstance(env.grid.get(x, y), Door):  # Check if cell is a wall
                 plt.scatter(x, env.height - y - 1, color="yellow", s=80, marker='D', edgecolors="black",
                             linewidth=1.2)
+
+    # # Overlay explicit key icons at given locations
+    # keys_to_plot = [
+    #     (2, 3, "red"),
+    #     (5, 7, "green"),
+    #     (9, 11, "blue"),
+    # ]
+    # for kx, ky, kc in keys_to_plot:
+    #     if 0 <= kx < env.width and 0 <= ky < env.height:
+    #         plt.scatter(kx, env.height - ky - 1, s=120, marker="P",
+    #                     color=kc, edgecolors="black", linewidth=1.0, zorder=5)
+    #         # Optional: add a small 'K' label
+    #         plt.text(kx, env.height - ky - 1, "K", ha="center", va="center",
+    #                  color="white", fontsize=9, fontweight="bold", zorder=6)
 
     # Overlay goal position in green
     if hasattr(env, "goal_pos") and env.goal_pos:
@@ -166,9 +180,12 @@ class CustomEnv(EmptyEnv):
         crossing = 1
         four_rooms = 2
         multi_room = 3
+        multi_room_key = 5
         twelve_rooms = 4
+        long_corridor = 6
 
     def __init__(self, **kwargs):
+        self.roomList = []
         self.shaped_reward = 0
         self.termination_reward = 0
         self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
@@ -245,6 +262,9 @@ class CustomEnv(EmptyEnv):
         if self.env_type == CustomEnv.Environments.multi_room:
             self.max_door = 3
 
+        if self.env_type == CustomEnv.Environments.multi_room_key:
+            self.max_door = 3
+
         self.intrinsic_reward = 0
         self.done = False
 
@@ -311,6 +331,7 @@ class CustomEnv(EmptyEnv):
         obs, reward, terminated, truncated, _ = super().step(action)
         next_obs_hash = self.hash_()
         next_obs = obs["image"]
+        next_dir = self.agent_dir
         next_pos = (self.agent_pos[0], self.agent_pos[1]) if isinstance(self.agent_pos, np.ndarray) else self.agent_pos
         next_dir = self.agent_dir
 
@@ -346,6 +367,8 @@ class CustomEnv(EmptyEnv):
                     next_obs_hash,
                     state_changed
                 )
+
+            # print(f"x:{self.agent_pos[0]}, y:{self.agent_pos[1]}, Intrinsic Reward: {self.intrinsic_reward}, Obs Hash: {current_obs_hash}, Next Obs Hash: {next_obs_hash}")
 
         if self.enable_count_based:
             self.intrinsic_reward = self.count_based.update((prev_pos[0], prev_pos[1]), action, reward, self.goal_pos)
@@ -400,8 +423,12 @@ class CustomEnv(EmptyEnv):
             self.four_rooms(width, height)
         elif self.env_type == CustomEnv.Environments.multi_room:
             self.multi_room(width, height)
+        elif self.env_type == CustomEnv.Environments.multi_room_key:
+            self.multi_room_key(width, height)
         elif self.env_type == CustomEnv.Environments.twelve_rooms:
             self.twelve_rooms(width, height)
+        elif self.env_type == CustomEnv.Environments.long_corridor:
+            self.long_corridor(width, height)
 
     def img_observation(self, size=32):
         if not self.is_partial_obs:
@@ -605,6 +632,76 @@ class CustomEnv(EmptyEnv):
         self.grid.set(6, 9, Door(color="yellow", is_open=False))
         self.grid.set(14, 10, Door(color="yellow", is_open=False))
         self.max_door = 3
+        # ----------------------------------------------------------------------
+        # 4) Agent start in the top-left corridor
+        # ----------------------------------------------------------------------
+        self.agent_pos = (2, 1)
+        self.agent_dir = 0  # facing right
+
+        # ----------------------------------------------------------------------
+        # 5) Goal in the lower corridor (the green square)
+        # ----------------------------------------------------------------------
+        self.put_obj(Goal(), 17, 17)
+        self.goal_pos = (17, 17)
+
+    def multi_room_key(self, width, height):
+        """
+        Example of a 19×19 fixed, maze-like layout with several locked doors
+        requiring keys, and a goal in the lower corridor.
+        """
+        # Force the grid size to 19×19.
+        width = 19
+        height = 19
+        self.grid = Grid(width, height)
+
+        # 1) Surrounding outer walls
+        self.grid.wall_rect(1, 0, 5, 7)
+        self.grid.wall_rect(0, 6, 7, 5)
+        self.grid.wall_rect(6, 8, 9, 5)
+        self.grid.wall_rect(14, 8, 5, 11)
+        self.grid.set(3, 6, Door(color="red", is_open=False, is_locked=True))
+        self.grid.set(6, 9, Door(color="green", is_open=False, is_locked=True))
+        self.grid.set(14, 10, Door(color="blue", is_open=False, is_locked=True))
+        self.max_door = 3
+
+        # Room definitions: (x_range, y_range, room_exit)
+        rooms = {
+            "1": ((2, 4), (1, 5), (3, 6)),
+            "2": ((1, 5), (7, 9), (6, 9)),
+            "3": ((7, 13), (9, 11), (14, 10)),
+        }
+
+        # Place one key per room: sample until we find a free cell
+        for _, (x_range, y_range, room_exit) in rooms.items():
+            min_x, max_x = x_range
+            min_y, max_y = y_range
+
+            door = self.grid.get(*room_exit)
+            if not isinstance(door, Door):
+                continue
+
+            # Cap sampling attempts to avoid infinite loops on crowded rooms
+            max_tries = (max_x - min_x + 1) * (max_y - min_y + 1) * 3
+            tries = 0
+            while tries < max_tries:
+                key_pos = (
+                    int(np.random.randint(min_x, max_x + 1)),
+                    int(np.random.randint(min_y, max_y + 1)),
+                )
+
+                # Reject reserved cells and non-empty cells
+                if (
+                        key_pos != (2, 1)
+                        and key_pos != (17, 17)
+                        and self.grid.get(*key_pos) is None
+                ):
+                    self.put_obj(Key(color=door.color), *key_pos)
+                    break
+                tries += 1
+
+        # self.put_obj(Key(color="red"), 2, 3)
+        # self.put_obj(Key(color="green"), 5, 7)
+        # self.put_obj(Key(color="blue"), 9, 11)
         # ----------------------------------------------------------------------
         # 4) Agent start in the top-left corridor
         # ----------------------------------------------------------------------
@@ -826,12 +923,10 @@ class CustomEnv(EmptyEnv):
         self.maxNumRooms = 4
         self.maxRoomSize = 12
 
-        roomList = []
-
         # Choose a random number of rooms to generate
         numRooms = self._rand_int(self.minNumRooms, self.maxNumRooms + 1)
 
-        while len(roomList) < numRooms:
+        while len(self.roomList) < numRooms:
             curRoomList = []
 
             entryDoorPos = (self._rand_int(0, width - 2), self._rand_int(0, width - 2))
@@ -846,12 +941,12 @@ class CustomEnv(EmptyEnv):
                 entryDoorPos=entryDoorPos,
             )
 
-            if len(curRoomList) > len(roomList):
-                roomList = curRoomList
+            if len(curRoomList) > len(self.roomList):
+                self.roomList = curRoomList
 
         # Store the list of rooms in this environment
-        assert len(roomList) > 0
-        self.rooms = roomList
+        assert len(self.roomList) > 0
+        self.rooms = self.roomList
 
         # Create the grid
         self.grid = Grid(width, height)
@@ -860,7 +955,7 @@ class CustomEnv(EmptyEnv):
         prevDoorColor = None
 
         # For each room
-        for idx, room in enumerate(roomList):
+        for idx, room in enumerate(self.roomList):
             topX, topY = room.top
             sizeX, sizeY = room.size
 
@@ -888,10 +983,10 @@ class CustomEnv(EmptyEnv):
                 self.grid.set(room.entryDoorPos[0], room.entryDoorPos[1], entryDoor)
                 prevDoorColor = doorColor
 
-                prevRoom = roomList[idx - 1]
+                prevRoom = self.roomList[idx - 1]
                 prevRoom.exitDoorPos = room.entryDoorPos
 
-        for idx, room in enumerate(roomList):
+        for idx, room in enumerate(self.roomList):
             topX, topY = room.top
             sizeX, sizeY = room.size
             while True:
@@ -907,12 +1002,96 @@ class CustomEnv(EmptyEnv):
                 except (ValueError, TypeError):
                     break
         # Randomize the starting agent position and direction
-        self.place_agent(roomList[0].top, roomList[0].size)
+        self.place_agent(self.roomList[0].top, self.roomList[0].size)
 
         # Place the final goal in the last room
-        self.goal_pos = self.place_obj(Goal(), roomList[-1].top, roomList[-1].size)
+        self.goal_pos = self.place_obj(Goal(), self.roomList[-1].top, self.roomList[-1].size)
 
         self.mission = "traverse the rooms to get to the goal"
+
+    def long_corridor(self, width, height):
+        self.grid = Grid(width, height)
+        self.grid.wall_rect(0, 0, width, height)
+
+        for x in range(1, width - 1):
+            for y in range(1, height - 1):
+                self.grid.set(x, y, Wall())
+
+        start_w, start_h = 5, 5
+        start_left = width // 2 - start_w // 2
+        start_top = 1
+        for x in range(start_left, start_left + start_w):
+            for y in range(start_top, start_top + start_h):
+                self.grid.set(x, y, None)
+
+        self.agent_pos = (start_left + start_w // 2, start_top + start_h // 2)
+        self.agent_dir = 1
+        center_y = self.agent_pos[1]
+
+        def build_path(points):
+            coords = [points[0]]
+            for i in range(len(points) - 1):
+                x0, y0 = points[i]
+                x1, y1 = points[i + 1]
+                assert x0 == x1 or y0 == y1, "Segments must be axis-aligned"
+                dx = int(np.sign(x1 - x0))
+                dy = int(np.sign(y1 - y0))
+                steps = abs(x1 - x0) + abs(y1 - y0)
+                cx, cy = x0, y0
+                for _ in range(steps):
+                    cx += dx
+                    cy += dy
+                    coords.append((cx, cy))
+            return coords
+
+        def carve_pattern(coords):
+            seen = set()
+            for x, y in coords:
+                if (x, y) in seen:
+                    continue
+                seen.add((x, y))
+                color = "red" if (x + y) % 2 == 0 else "blue"
+                self.grid.set(x, y, Floor(color=color))
+
+        loop_right = start_left - 1
+        loop_left = max(1, loop_right - 5)
+        loop_top = start_top
+        loop_bottom = start_top + start_h + 3
+        if loop_left >= loop_right:
+            raise ValueError("Grid too small for the boredom loop.")
+
+        loop_points = [
+            (loop_left, loop_top),
+            (loop_right, loop_top),
+            (loop_right, loop_bottom),
+            (loop_left, loop_bottom),
+            (loop_left, loop_top),
+        ]
+        loop_coords = build_path(loop_points)
+
+        exit_entry_x = start_left + start_w
+        if exit_entry_x + 2 >= width - 1:
+            raise ValueError("Grid too small for the boredom exit.")
+
+        exit_points = [
+            (exit_entry_x, center_y),
+            (width - 4, center_y),
+            (width - 4, center_y + 5),
+            (exit_entry_x + 2, center_y + 5),
+            (exit_entry_x + 2, height - 4),
+            (width - 3, height - 4),
+            (width - 3, height - 2),
+            (width - 2, height - 2),
+        ]
+        exit_coords = build_path(exit_points)
+
+        carve_pattern(loop_coords + exit_coords)
+
+        goal_pos = exit_coords[-1]
+        self.grid.set(*goal_pos, None)
+        self.put_obj(Goal(), *goal_pos)
+        self.goal_pos = goal_pos
+        self.mission = "avoid the boredom trap and find the goal"
 
 
 def custom_trial_name(trial):
@@ -965,6 +1144,8 @@ if __name__ == "__main__":
         "crossing",
         "four_rooms",
         "multi_room",
+        "multi_room_key",
+        "long_corridor",
         "twelve_rooms",
     ], default="empty")
     parser.add_argument('--obs_type', type=str, choices=['conv', 'position', 'flat'], default='position',
@@ -1167,10 +1348,28 @@ if __name__ == "__main__":
                     "env_type": CustomEnv.Environments[args.environment],
                     "max_steps": args.max_steps,
                     "conv_filter": args.conv_filter,
-                    "enable_dowham_reward_v1": args.enable_dowham_reward_v1,
-                    "enable_dowham_reward_v2": args.enable_dowham_reward_v2,
-                    "enable_count_based": args.enable_count_based,
-                    "enable_rnd": args.enable_rnd,
+                    "enable_dowham_reward_v1": True,
+                    "enable_dowham_reward_v2": False,
+                    "enable_count_based": False,
+                    "enable_rnd": False,
+                },
+                {
+                    "env_type": CustomEnv.Environments[args.environment],
+                    "max_steps": args.max_steps,
+                    "conv_filter": args.conv_filter,
+                    "enable_dowham_reward_v1": False,
+                    "enable_dowham_reward_v2": True,
+                    "enable_count_based": False,
+                    "enable_rnd": False,
+                },
+                {
+                    "env_type": CustomEnv.Environments[args.environment],
+                    "max_steps": args.max_steps,
+                    "conv_filter": args.conv_filter,
+                    "enable_dowham_reward_v1": False,
+                    "enable_dowham_reward_v2": False,
+                    "enable_count_based": True,
+                    "enable_rnd": False,
                 },
             ]),
             "seed": tune.grid_search(list(range(args.num_samples))),
