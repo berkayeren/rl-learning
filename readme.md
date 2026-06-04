@@ -158,6 +158,59 @@ of 1444 steps per episode, uses convolutional observations (`--obs_type conv`), 
 | `--enable_rnd`              | off           | Enable Random Network Distillation exploration (experimental, not fully implemented — may not work).       |
 | `--conv_filter`             | off           | Use a convolutional layer instead of flat observations.                                                    |
 
+## Neural Network Architecture and Hyperparameters
+
+The agent is trained with PPO from Ray RLlib (PyTorch backend, `framework("torch")`), using a recurrent
+actor-critic policy. The full configuration is defined in `trainer.py`.
+
+### Policy network
+
+The policy is a fully-connected feature extractor followed by an LSTM head, with **separate** policy and value
+networks (`vf_share_layers=False`):
+
+| Component                                           | Value                           |
+|-----------------------------------------------------|---------------------------------|
+| Feature MLP (`fcnet_hiddens`)                       | `[512, 512]`, `tanh` activation |
+| Post-FC layer (`post_fcnet_hiddens`)                | `[512]`, `relu` activation      |
+| Recurrence (`use_lstm`)                             | LSTM, `lstm_cell_size = 256`    |
+| Max sequence length (`max_seq_len`)                 | `64`                            |
+| LSTM previous action input (`lstm_use_prev_action`) | enabled                         |
+| LSTM previous reward input (`lstm_use_prev_reward`) | enabled                         |
+| Attention (`use_attention`)                         | disabled                        |
+| Value/policy layer sharing (`vf_share_layers`)      | disabled (separate value head)  |
+
+Observations are produced by the wrapper selected with `--obs_type` (`conv` uses partial RGB image observations;
+`position` and `flat` use vector observations). The environment grid is `19 × 19` with `tile_size = 12`.
+
+### PPO hyperparameters
+
+| Hyperparameter                                    | Value                                                                         |
+|---------------------------------------------------|-------------------------------------------------------------------------------|
+| Learning rate (`lr`)                              | `2.5e-4` (constant, no schedule)                                              |
+| Discount factor (`gamma`)                         | `0.99`                                                                        |
+| GAE lambda (`lambda_`)                            | `0.95`                                                                        |
+| Clip parameter (`clip_param`)                     | `0.3`                                                                         |
+| Value function clip (`vf_clip_param`)             | `10.0`                                                                        |
+| Value function loss coeff (`vf_loss_coeff`)       | `0.5`                                                                         |
+| KL loss (`use_kl_loss`)                           | enabled, `kl_coeff = 0.2`, `kl_target = 0.01`                                 |
+| Entropy coefficient (`entropy_coeff`)             | `0.006`, scheduled to `0.002` at half of total timesteps and `0.0` at the end |
+| Train batch size (`train_batch_size_per_learner`) | `16384`                                                                       |
+| Minibatch size (`minibatch_size`)                 | `2048`                                                                        |
+| Epochs per iteration (`num_epochs`)               | `6`                                                                           |
+| GAE / critic (`use_gae`, `use_critic`)            | enabled                                                                       |
+| Rollout fragment length                           | `64` (`batch_mode = "truncate_episodes"`)                                     |
+
+### Compute / learner setup
+
+| Setting                                     | Value                                                                  |
+|---------------------------------------------|------------------------------------------------------------------------|
+| Learners (`num_learners`)                   | `1`                                                                    |
+| GPUs per learner (`num_gpus_per_learner`)   | `0.8` when `--num_gpus > 0`, else `0`                                  |
+| CPUs per learner (`num_cpus_per_learner`)   | `1`                                                                    |
+| Env runners (`num_env_runners`)             | `--num_rollout_workers`                                                |
+| Envs per runner (`num_envs_per_env_runner`) | `--num_envs_per_worker`                                                |
+| Evaluation                                  | every `--evaluation_interval` iterations, `10` episodes per evaluation |
+
 ## Monitoring with TensorBoard
 
 Ray writes training metrics to a per-session artifacts directory. You can watch them live with TensorBoard by pointing
