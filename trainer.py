@@ -1,3 +1,35 @@
+"""
+trainer.py — PPO training entry point for MiniGrid exploration experiments.
+
+This module wires together a configurable MiniGrid environment, several intrinsic
+motivation methods, and Ray RLlib's PPO algorithm to study how different
+exploration bonuses affect an agent's ability to solve sparse-reward grid worlds.
+
+High-level structure
+--------------------
+* ``CustomCallback`` — an RLlib callback that records per-episode diagnostic
+  metrics (action counts, intrinsic/shaped reward, map coverage).
+* ``plot_heatmap`` — utility that renders an agent visit-count heatmap with
+  walls, doors, and the goal overlaid.
+* ``CustomEnv`` — a single MiniGrid environment subclass that can be configured
+  (via ``env_type``) to build any of several hand-designed layouts (empty,
+  crossing, four-rooms, multi-room, multi-room-with-keys, twelve-rooms, long
+  corridor). It also computes the intrinsic reward each step using whichever
+  exploration method is enabled (DoWhaM v1/v2, count-based, or RND) and shapes
+  the extrinsic reward.
+* ``custom_trial_name`` — produces human-readable Ray Tune trial names.
+* ``__main__`` — parses CLI arguments, registers the environment under the
+  chosen observation wrapper, builds a PPO config, and launches either a grid
+  search "experiment" or a "hyperparameter_search".
+
+Coordinate convention
+---------------------
+MiniGrid uses ``(x, y)`` integer grid coordinates with the origin at the
+top-left. The agent observes a 7×7 egocentric window (see ``VIEW_SIZE``) and the
+DoWhaM v2 reward needs to map cells of that window back to global coordinates;
+``BASE_OFFSETS`` plus ``transform_coords`` handle that egocentric→global mapping.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -15,10 +47,20 @@ from gymnasium import spaces
 from matplotlib import pyplot as plt
 from minigrid.core.constants import COLOR_NAMES
 
+# --- Egocentric-view geometry -------------------------------------------------
+# The agent sees a VIEW_SIZE×VIEW_SIZE window. The agent itself sits at the
+# bottom-center of that window (it always looks "up" within its own view), so we
+# anchor the offset grid there.
 VIEW_SIZE = 7
 # Pivot at bottom-center of the egocentric view (row 6, col 3)
 PIVOT_ROW = VIEW_SIZE - 1
 PIVOT_COL = VIEW_SIZE // 2
+# BASE_OFFSETS[i, j] gives the (dx, dy) displacement, relative to the agent, of
+# the cell at row ``i`` / col ``j`` of the egocentric window, assuming the agent
+# faces East (agent_dir == 0). ``dx`` runs forward from the agent (rows closer
+# to the top of the view are farther ahead) and ``dy`` runs left→right across
+# the view. ``transform_coords`` rotates these base offsets for the other three
+# facing directions.
 BASE_OFFSETS = np.array([
     [(PIVOT_ROW - i, j - PIVOT_COL) for j in range(VIEW_SIZE)]
     for i in range(VIEW_SIZE)
@@ -51,6 +93,26 @@ from minigrid.core.constants import OBJECT_TO_IDX
 
 
 class CustomCallback(RLlibCallback):
+    """RLlib callback that logs per-episode exploration diagnostics.
+
+    RLlib invokes the ``on_episode_*`` hooks on each env-runner as rollouts are
+    collected. This callback writes values onto ``episode.custom_metrics`` so
+    they are aggregated and surfaced in the training results (and any connected
+    logger such as TensorBoard). The metrics it records are:
+
+    * per-action counters (``left``, ``right``, ``forward``, ``pickup``,
+      ``drop``, ``toggle``, ``done``) — how often the policy chose each action;
+    * ``intrinsic_reward`` / ``shaped_reward`` / ``termination_reward`` — the
+      reward components computed by :class:`CustomEnv` on the latest step;
+    * ``step_done`` — whether the environment terminated on this step;
+    * ``percentage_visited`` — fraction of the grid the agent touched this
+      episode (computed by the env on ``reset``);
+    * ``percentage_history`` — number of successful terminations in the env's
+      rolling 100-episode window.
+
+    The custom-metric values are pulled from the *unwrapped* sub-environment,
+    which is the :class:`CustomEnv` instance carrying the attributes above.
+    """
 
     def on_episode_start(
             self,
@@ -67,6 +129,11 @@ class CustomCallback(RLlibCallback):
             policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
+        """Initialize the per-action counters at the start of every episode.
+
+        The counters are zeroed here so that ``on_episode_step`` can increment
+        the one matching the action actually taken.
+        """
         episode.custom_metrics["left"] = 0
         episode.custom_metrics["right"] = 0
         episode.custom_metrics["forward"] = 0
@@ -90,6 +157,11 @@ class CustomCallback(RLlibCallback):
             policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
+        """Record reward components and tally the action taken on this step.
+
+        Reads the freshly updated reward fields off the unwrapped env and
+        increments the counter named after the action enum (e.g. ``forward``).
+        """
         env = base_env.get_sub_environments()[env_index].unwrapped
         episode.custom_metrics["intrinsic_reward"] = env.intrinsic_reward
         episode.custom_metrics["shaped_reward"] = env.shaped_reward
@@ -112,14 +184,29 @@ class CustomCallback(RLlibCallback):
             policies: Optional[Dict[PolicyID, Policy]] = None,
             **kwargs,
     ) -> None:
+        """Record episode-level coverage stats once the episode finishes.
+
+        ``percentage_visited`` is the share of the grid the agent touched, and
+        ``percentage_history`` is the count of successful terminations in the
+        env's rolling 100-episode window — both maintained by the env.
+        """
         env = base_env.get_sub_environments()[env_index].unwrapped
         episode.custom_metrics["percentage_visited"] = env.percentage_visited
         episode.custom_metrics["percentage_history"] = env.percentage_history.count(True)
 
 
 def plot_heatmap(env, filename="visit_heatmap.png"):
-    """
-    Plots a heatmap of agent visits, overlaying walls and the goal position.
+    """Render and save a heatmap of how often each grid cell was visited.
+
+    The agent's per-cell visit counts (``env.states``) are drawn as a "hot"
+    colormap, with walls (black squares), doors (yellow diamonds), and the goal
+    (green star) overlaid for context. The figure is written to the project's
+    ``heatmaps/`` directory.
+
+    Args:
+        env: A :class:`CustomEnv` (unwrapped) exposing ``states`` (the visit
+            grid), ``grid``, ``width``/``height``, and optionally ``goal_pos``.
+        filename: Output file name; saved under ``heatmaps/``.
     """
     heatmap_data = np.flipud(env.states.T)  # Flip for correct orientation
 
@@ -175,7 +262,36 @@ def plot_heatmap(env, filename="visit_heatmap.png"):
 
 
 class CustomEnv(EmptyEnv):
+    """Configurable MiniGrid environment with pluggable intrinsic motivation.
+
+    A single environment class that can build any of several hand-designed grid
+    layouts and augment the sparse extrinsic reward with one of several
+    exploration bonuses. Which layout is built is selected by ``env_type`` (see
+    the :class:`Environments` enum); which intrinsic reward is active is selected
+    by the ``enable_*`` flags (at most one is normally enabled).
+
+    Per step it:
+      1. records the visited cell into ``self.states`` (for the heatmap/coverage);
+      2. computes an intrinsic reward via the enabled method;
+      3. shapes the extrinsic reward with a success bonus and the (scaled)
+         intrinsic reward.
+
+    Key instance attributes (read by :class:`CustomCallback`):
+        intrinsic_reward: Latest intrinsic bonus from the active method.
+        shaped_reward: Total shaping added to the env reward this step.
+        termination_reward: Success bonus added on the terminating step.
+        done: Whether the env terminated on the latest step.
+        percentage_visited: Grid coverage (%) from the previous episode.
+        percentage_history: Rolling deque (maxlen 100) of episode success flags.
+        states: ``(width, height)`` int array of per-cell visit counts.
+    """
+
     class Environments(IntEnum):
+        """Enumeration of the available grid layouts.
+
+        The integer values are the codes passed through ``env_config`` and CLI
+        ``--environment``; each maps to a ``_gen_grid`` builder method.
+        """
         empty = 0
         crossing = 1
         four_rooms = 2
@@ -185,6 +301,21 @@ class CustomEnv(EmptyEnv):
         long_corridor = 6
 
     def __init__(self, **kwargs):
+        """Pull configuration out of ``kwargs`` and initialize exploration state.
+
+        Recognized ``kwargs`` (all optional, with defaults) include:
+          * ``env_type`` — which :class:`Environments` layout to build.
+          * ``enable_dowham_reward_v1`` / ``enable_dowham_reward_v2`` /
+            ``enable_count_based`` / ``enable_rnd`` — selects the intrinsic
+            reward module (instantiated below). Typically only one is True.
+          * ``max_steps`` — episode step budget (default 200).
+          * ``size`` — grid side length (default 19); some layouts force 19.
+          * ``tile_size`` — pixel size per tile for RGB rendering.
+          * ``is_partial_obs`` / ``direction_obs`` / ``highlight`` /
+            ``conv_filter`` — observation/rendering options.
+
+        Any remaining ``kwargs`` are forwarded to ``EmptyEnv.__init__``.
+        """
         self.shaped_reward = 0
         self.termination_reward = 0
         self.env_type = kwargs.pop("env_type", CustomEnv.Environments.empty)
@@ -269,15 +400,27 @@ class CustomEnv(EmptyEnv):
 
     @staticmethod
     def _gen_mission():
+        """Return the default mission string shown to the agent."""
         return "get to the green goal square"
 
     def _reward(self) -> float:
-        """
-        Compute the reward to be given upon success
+        """Compute the success reward, decayed by how long the episode took.
+
+        Returns a value in ``(1, 10]``: 10 for reaching the goal immediately,
+        decaying linearly toward 1 as ``step_count`` approaches ``max_steps``.
+        This rewards faster solutions.
         """
         return 10 - 9 * (self.step_count / self.max_steps)
 
     def transform_coords(self, x, y, agent_dir):
+        """Rotate an East-facing ``(x, y)`` offset into the agent's facing frame.
+
+        ``BASE_OFFSETS`` are defined assuming the agent faces East
+        (``agent_dir == 0``). This applies the corresponding 90°-step rotation so
+        the offset is expressed in global grid axes for the actual facing
+        direction (0=right, 1=down, 2=left, 3=up). Returns the rotated
+        ``(x, y)`` tuple, or ``None`` for an unrecognized direction.
+        """
         if agent_dir == 0:  # Right (→), no change
             return x, y
         elif agent_dir == 1:  # Down (↓), rotate clockwise 90°
@@ -321,6 +464,30 @@ class CustomEnv(EmptyEnv):
         return visible
 
     def step(self, action: int):
+        """Advance the environment one step and shape the reward.
+
+        Pipeline:
+          1. Record the current cell into the visit grid and snapshot the
+             pre-step observation hash, position, and direction.
+          2. Delegate to ``super().step`` for the base MiniGrid transition.
+          3. Compute the intrinsic reward with whichever method is enabled:
+             - DoWhaM v1/v2: update visit/usage/effectiveness statistics, then
+               score the action; v2 additionally uses the global coordinates of
+               the cells visible before/after (via
+               :meth:`extract_visible_coords_from_obs`) and the new position.
+             - count-based: bonus from state-action visitation counts.
+             - RND: prediction-error novelty bonus (see :meth:`rnd_reward`).
+          4. Shape the reward: add the success bonus on termination and add the
+             intrinsic reward scaled by 0.05; the total shaping is stored on
+             ``self.shaped_reward`` and added to the env reward.
+
+        Args:
+            action: Discrete MiniGrid action index.
+
+        Returns:
+            The standard Gymnasium 5-tuple ``(obs, reward, terminated,
+            truncated, info)`` with ``reward`` including the shaping above.
+        """
         self.states[self.agent_pos[0]][self.agent_pos[1]] += 1
         self.action = action
         current_obs = self.gen_obs()["image"]
@@ -392,6 +559,14 @@ class CustomEnv(EmptyEnv):
         return obs, reward, terminated, truncated, {}
 
     def rnd_reward(self, obs):
+        """Compute the RND novelty bonus for ``obs`` and update the predictor.
+
+        Flattens the (possibly dict) observation into a float32 vector, updates
+        the running observation normalizer, stores the prediction-error-based
+        intrinsic reward on ``self.intrinsic_reward``, and takes a gradient step
+        on the RND predictor network so already-seen states yield smaller bonuses
+        over time.
+        """
         # First, convert observation to a format suitable for RND
         if isinstance(obs, dict):
             # Flatten dict observation
@@ -414,6 +589,11 @@ class CustomEnv(EmptyEnv):
         self.rnd.update_predictor(flat_obs)
 
     def _gen_grid(self, width, height):
+        """Dispatch to the layout builder selected by ``self.env_type``.
+
+        Called by the base MiniGrid machinery during reset. Each branch
+        populates ``self.grid``, the agent start, and the goal for one layout.
+        """
         if self.env_type == CustomEnv.Environments.crossing:
             self.crossing_env(width, height)
         elif self.env_type == CustomEnv.Environments.empty:
@@ -430,6 +610,14 @@ class CustomEnv(EmptyEnv):
             self.long_corridor(width, height)
 
     def img_observation(self, size=32):
+        """Return ``(state_hash, rgb_image)`` for the current state.
+
+        For partial observability the agent's 7×7 egocentric image is used. For
+        full observability a rendered RGB frame is produced; when
+        ``direction_obs`` is False the frame is rendered with the agent
+        temporarily forced to face East so orientation does not leak into the
+        image. ``size`` controls the hash length.
+        """
         if not self.is_partial_obs:
             if self.direction_obs:
                 rgb_img = self.get_frame(
@@ -449,8 +637,14 @@ class CustomEnv(EmptyEnv):
         return self.hash_(size=size), rgb_img
 
     def hash_(self, current_obs=None, size=16):
-        """Compute a hash that uniquely identifies the current state of the environment.
-        :param size: Size of the hashing
+        """Compute a short hash uniquely identifying the current state.
+
+        Used as a dictionary key by the DoWhaM intrinsic-reward bookkeeping to
+        recognize repeated states. If ``current_obs`` is given it is hashed
+        directly; otherwise the agent's currently visible encoded grid is hashed.
+
+        :param current_obs: Optional pre-computed observation image to hash.
+        :param size: Number of leading hex digits of the digest to return.
         """
         sample_hash = hashlib.sha256()
 
@@ -469,6 +663,12 @@ class CustomEnv(EmptyEnv):
         return sample_hash.hexdigest()[:size]
 
     def crossing_env(self, width, height):
+        """Build a SimpleCrossing-style layout with one wall "river" and a door.
+
+        Walls form a barrier dividing the grid; a single opening (rendered as a
+        closed yellow door) is carved so a path exists from the top-left agent
+        start to the bottom-right goal. Requires odd ``width``/``height``.
+        """
         import itertools as itt
         assert width % 2 == 1 and height % 2 == 1  # odd size
         self.obstacle_type = Wall
@@ -537,6 +737,11 @@ class CustomEnv(EmptyEnv):
         )
 
     def empty_env_random_goal(self, width, height):
+        """Build an empty walled room with the agent at (1,1) and goal at (17,17).
+
+        Despite the name, the goal is currently fixed at (17, 17); the commented
+        block shows how it was previously randomized.
+        """
         self.max_door = 0
         self.agent_pos = (1, 1)
         self.agent_dir = 0
@@ -554,6 +759,12 @@ class CustomEnv(EmptyEnv):
         #         break
 
     def four_rooms(self, width, height):
+        """Build a classic FourRooms layout with doors at fixed wall midpoints.
+
+        Two interior walls split the grid into four quadrants; four yellow doors
+        (at the hard-coded midpoints) connect them. The agent starts top-left and
+        the goal sits bottom-right.
+        """
         self.max_door = 4
         self.agent_pos = np.array((1, 1))
         self.agent_dir = 0
@@ -714,6 +925,13 @@ class CustomEnv(EmptyEnv):
         self.goal_pos = (17, 17)
 
     def _multi_room(self, width, height):
+        """Procedurally generate a connected chain of randomly placed rooms.
+
+        Repeatedly calls :meth:`_placeRoom` to lay out non-overlapping rooms
+        joined by colored doors (each door a different color from its
+        predecessor), places the agent in the first room and the goal in the
+        last. Unlike :meth:`multi_room`, this layout is randomized each reset.
+        """
         self.minNumRooms = 2
         self.maxNumRooms = 2
         self.maxRoomSize = 9
@@ -793,6 +1011,17 @@ class CustomEnv(EmptyEnv):
         self.mission = "traverse the rooms to get to the goal"
 
     def _placeRoom(self, numLeft, roomList, minSz, maxSz, entryDoorWall, entryDoorPos):
+        """Recursively place one room and try to attach the remaining rooms.
+
+        Picks a random room size anchored at ``entryDoorPos`` on the wall given
+        by ``entryDoorWall`` (0=right, 1=south, 2=left, 3=top). Rejects positions
+        that fall outside the grid or overlap existing rooms. On success the room
+        is appended to ``roomList`` and, unless this was the last room
+        (``numLeft == 1``), it attempts up to 8 exit-wall placements to recurse.
+
+        Returns:
+            bool: True if this room (and the recursion below it) was placed.
+        """
         # Choose the room size randomly
         sizeX = self._rand_int(minSz, maxSz + 1)
         sizeY = self._rand_int(minSz, maxSz + 1)
@@ -888,10 +1117,20 @@ class CustomEnv(EmptyEnv):
         return True
 
     def gen_obs(self):
+        """Return the base MiniGrid observation as a shallow-copied dict."""
         obs = super().gen_obs()
         return {**obs}
 
     def reset(self, **kwargs):
+        """Reset for a new episode and finalize the previous episode's stats.
+
+        Before resetting, computes ``percentage_visited`` (fraction of cells
+        with a nonzero visit count) for the episode just ended and pushes the
+        terminal success flag onto ``percentage_history``. Then clears the visit
+        grid, resets the active DoWhaM reward's per-episode state, restores the
+        layout-appropriate agent start, and reseeds the base env with a fresh
+        random seed so procedural layouts are re-randomized.
+        """
         total_size = self.width * self.height
         # Calculate the number of unique states visited by the agent
         unique_states_visited = np.count_nonzero(self.states)
@@ -918,6 +1157,13 @@ class CustomEnv(EmptyEnv):
         return obs, {}
 
     def twelve_rooms(self, width, height):
+        """Procedurally generate a 4-room layout behind locked, keyed doors.
+
+        Like :meth:`_multi_room` but each connecting door is locked and a key of
+        the matching color is scattered somewhere inside the room it leads out
+        of, so the agent must collect keys to progress toward the goal in the
+        final room.
+        """
         self.minNumRooms = 4
         self.maxNumRooms = 4
         self.maxRoomSize = 12
@@ -1009,6 +1255,14 @@ class CustomEnv(EmptyEnv):
         self.mission = "traverse the rooms to get to the goal"
 
     def long_corridor(self, width, height):
+        """Build a "boredom trap" maze: a tempting dead-end loop plus a real exit.
+
+        Fills the grid with walls, then carves a small start room, a colored
+        rectangular loop adjacent to it (the distracting "boredom" path that
+        leads nowhere), and a longer winding corridor that actually reaches the
+        goal. Designed to probe whether an exploration bonus lures the agent into
+        endlessly revisiting the loop instead of finding the exit.
+        """
         self.grid = Grid(width, height)
         self.grid.wall_rect(0, 0, width, height)
 
@@ -1127,6 +1381,15 @@ def custom_trial_name(trial):
 
 
 if __name__ == "__main__":
+    # ------------------------------------------------------------------------
+    # CLI entry point. Parses arguments, initializes Ray, registers the env
+    # under the chosen observation wrapper (conv/position/flat), builds a PPO
+    # config, and launches either:
+    #   * run_mode="experiment"            — a grid search over intrinsic-reward
+    #     methods (DoWhaM v1, DoWhaM v2, count-based) × seeds, or
+    #   * run_mode="hyperparameter_search" — a random search over PPO
+    #     hyperparameters with no intrinsic reward.
+    # ------------------------------------------------------------------------
     parser = argparse.ArgumentParser(description="Custom training script")
     parser.add_argument('--num_rollout_workers', type=int, help='The number of rollout workers', default=1)
     parser.add_argument('--num_envs_per_worker', type=int, help='The number of environments per worker', default=1)
@@ -1196,6 +1459,10 @@ if __name__ == "__main__":
     no_intrinsic_motivation = not (args.enable_dowham_reward_v1 or args.enable_dowham_reward_v2 or
                                    args.enable_count_based or args.enable_rnd)
 
+    # Base PPO configuration shared by both run modes. It is later deep-copied
+    # and overlaid with per-trial overrides (env_config / hyperparameters). The
+    # policy is an LSTM MLP (see model dict) trained with GAE, a KL penalty, and
+    # a decaying entropy coefficient schedule.
     config = (
         PPOConfig()
         .training(
@@ -1330,6 +1597,7 @@ if __name__ == "__main__":
 
     algo = config.build_algo()
 
+    # Keep the 5 best checkpoints by shortest mean episode length
     checkpoint_config = CheckpointConfig(
         num_to_keep=5,
         checkpoint_frequency=5,
@@ -1339,6 +1607,8 @@ if __name__ == "__main__":
     )
 
     if args.run_mode == 'experiment':
+        # Grid-search one trial per intrinsic-reward method × seed, all on the
+        # chosen environment, minimizing mean episode length.
         search_space = {
             **copy.deepcopy(config),
             "env_config": tune.grid_search([
@@ -1393,6 +1663,9 @@ if __name__ == "__main__":
             name=args.trail_name if hasattr(args, 'trail_name') and args.trail_name else None
         )
     elif args.run_mode == 'hyperparameter_search':
+        # Random search (BasicVariantGenerator) over core PPO hyperparameters
+        # with no intrinsic reward; the best config by mean episode length is
+        # printed at the end.
         trail = tune.Tuner(
             "PPO",  # Specify the RLlib algorithm
             param_space={
